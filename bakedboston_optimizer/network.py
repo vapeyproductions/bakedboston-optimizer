@@ -61,6 +61,9 @@ class NetworkSnapshot:
     availability_pauses: tuple[dict[str, Any], ...]
     schedule_exceptions: tuple[dict[str, Any], ...]
     routes: tuple[dict[str, Any], ...]
+    pickup_occurrences: tuple[dict[str, Any], ...]
+    ride_requests: tuple[dict[str, Any], ...]
+    route_offers: tuple[dict[str, Any], ...]
 
     @property
     def eligible_bakeries(self) -> tuple[OrganizationRecord, ...]:
@@ -129,6 +132,9 @@ def parse_snapshot(payload: dict[str, Any]) -> NetworkSnapshot:
         availability_pauses=tuple(payload.get("availabilityPauses", [])),
         schedule_exceptions=tuple(payload.get("scheduleExceptions", [])),
         routes=tuple(payload.get("routes", [])),
+        pickup_occurrences=tuple(payload.get("pickupOccurrences", [])),
+        ride_requests=tuple(payload.get("rideRequests", [])),
+        route_offers=tuple(payload.get("routeOffers", [])),
     )
 
 
@@ -148,6 +154,8 @@ def _shared(item: dict[str, Any]) -> dict[str, Any]:
 def _bakery(item: dict[str, Any]) -> OrganizationRecord:
     return OrganizationRecord(**_shared(item), schedule={
         "recurringDays": item.get("recurringDays", ""),
+        "businessOpenTime": item.get("businessOpenTime", "{}"),
+        "businessCloseTime": item.get("businessCloseTime", "{}"),
         "readyTime": item.get("readyTime", ""),
         "pickupDeadline": item.get("pickupDeadline", ""),
     })

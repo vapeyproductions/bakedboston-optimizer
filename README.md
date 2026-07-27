@@ -76,6 +76,8 @@ Set `GOOGLE_MAPS_API_KEY` only in a secure server environment. The current adapt
 
 The feed contains organization addresses, cached geocodes, schedules, availability changes, and route status history. It intentionally excludes logins, contacts, access instructions, photographs, and driver private data.
 
+Confirmed dated pickup occurrences, saved driver ride requests, and route-offer state are also included so the optimization model can rank advance matches as soon as a bakery commits to a pickup.
+
 Only organizations with active registered partner accounts appear in this feed. To validate and save addresses for currently registered partners:
 
 ```bash

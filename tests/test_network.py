@@ -28,12 +28,18 @@ class NetworkTests(unittest.TestCase):
             "availabilityPauses": [],
             "scheduleExceptions": [],
             "routes": [],
+            "pickupOccurrences": [{"id": 10, "status": "confirmed"}],
+            "rideRequests": [{"id": 20, "status": "active"}],
+            "routeOffers": [{"id": 30, "status": "offered"}],
         })
         bakery = snapshot.bakeries[0]
         self.assertEqual(bakery.location().formatted_address, "1 Main St, Boston, MA 02110, USA")
         self.assertEqual(bakery.schedule["readyTime"], "{}")
         self.assertTrue(bakery.optimization_eligible)
         self.assertEqual(snapshot.eligible_bakeries, snapshot.bakeries)
+        self.assertEqual(snapshot.pickup_occurrences[0]["status"], "confirmed")
+        self.assertEqual(snapshot.ride_requests[0]["status"], "active")
+        self.assertEqual(snapshot.route_offers[0]["status"], "offered")
 
     def test_missing_coordinates_require_geocoding(self) -> None:
         snapshot = parse_snapshot({
