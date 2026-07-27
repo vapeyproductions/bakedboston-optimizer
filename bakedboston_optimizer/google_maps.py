@@ -13,6 +13,7 @@ class GoogleMapsProvider:
 
     address_validation_url = "https://addressvalidation.googleapis.com/v1:validateAddress"
     compute_routes_url = "https://routes.googleapis.com/directions/v2:computeRoutes"
+    compute_route_matrix_url = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix"
 
     def __init__(self, api_key: str) -> None:
         if not api_key:
@@ -75,8 +76,43 @@ class GoogleMapsProvider:
             raise RuntimeError("Google Routes returned no driving route")
         return _duration_minutes(routes[0]["duration"])
 
+    def duration_matrix(
+        self,
+        origins: list[Location],
+        destinations: list[Location],
+        departure_at: datetime,
+    ) -> dict[tuple[int, int], float]:
+        if not origins or not destinations:
+            return {}
+        if len(origins) * len(destinations) > 100:
+            raise ValueError("TRAFFIC_AWARE_OPTIMAL matrices are limited to 100 route elements")
+        if departure_at.tzinfo is None:
+            raise ValueError("departure_at must include a timezone")
+        payload = {
+            "origins": [{"waypoint": _waypoint(location)} for location in origins],
+            "destinations": [{"waypoint": _waypoint(location)} for location in destinations],
+            "travelMode": "DRIVE",
+            "routingPreference": "TRAFFIC_AWARE_OPTIMAL",
+            "departureTime": departure_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        response = self._post(
+            self.compute_route_matrix_url,
+            payload,
+            {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": self.api_key,
+                "X-Goog-FieldMask": "originIndex,destinationIndex,duration,status,condition",
+            },
+        )
+        elements = response if isinstance(response, list) else response.get("elements", [])
+        return {
+            (int(element["originIndex"]), int(element["destinationIndex"])): _duration_minutes(element["duration"])
+            for element in elements
+            if element.get("condition") == "ROUTE_EXISTS" and "duration" in element
+        }
+
     @staticmethod
-    def _post(url: str, payload: dict[str, object], headers: dict[str, str]) -> dict[str, object]:
+    def _post(url: str, payload: dict[str, object], headers: dict[str, str]) -> dict[str, object] | list[dict[str, object]]:
         request = Request(url, data=json.dumps(payload).encode(), headers=headers, method="POST")
         with urlopen(request, timeout=20) as response:
             return json.loads(response.read())

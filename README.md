@@ -70,6 +70,12 @@ Set `GOOGLE_MAPS_API_KEY` only in a secure server environment. The current adapt
 
 `ComputeRouteMatrix` batching will be added when the initial model is connected to live organization data. Batching is an implementation optimization; the feasibility and scoring model already depends only on the `TravelTimeProvider` boundary.
 
+## Private BakedBoston data feed
+
+`BakedBostonNetworkClient` reads active operational data from the app's private `/api/optimizer/network` endpoint. It sends `OPTIMIZER_API_KEY` as a bearer token and rejects non-HTTPS URLs.
+
+The feed contains organization addresses, cached geocodes, schedules, availability changes, and route status history. It intentionally excludes logins, contacts, access instructions, photographs, and driver private data.
+
 API keys must remain server-side and must never be committed. Copy `.env.example` to `.env` only in a secure local environment.
 
 ## Roadmap
