@@ -73,6 +73,31 @@ class BakedBostonNetworkClient:
             payload = json.loads(response.read())
         return parse_snapshot(payload)
 
+    def save_validated_location(self, organization_type: str, organization_id: int, location: Location) -> None:
+        if organization_type not in {"bakery", "pantry"}:
+            raise ValueError("organization_type must be bakery or pantry")
+        payload = {
+            "organizationType": organization_type,
+            "organizationId": organization_id,
+            "formattedAddress": location.formatted_address,
+            "googlePlaceId": location.google_place_id,
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "addressValidationStatus": location.validation_status.value,
+        }
+        request = Request(
+            f"{self.url.rsplit('/', 1)[0]}/locations",
+            data=json.dumps(payload).encode(),
+            method="PATCH",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        with urlopen(request, timeout=20) as response:
+            response.read()
+
 
 def parse_snapshot(payload: dict[str, Any]) -> NetworkSnapshot:
     if payload.get("schemaVersion") != 1:

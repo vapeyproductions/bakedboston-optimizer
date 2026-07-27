@@ -76,6 +76,16 @@ Set `GOOGLE_MAPS_API_KEY` only in a secure server environment. The current adapt
 
 The feed contains organization addresses, cached geocodes, schedules, availability changes, and route status history. It intentionally excludes logins, contacts, access instructions, photographs, and driver private data.
 
+Only organizations with active registered partner accounts appear in this feed. To validate and save addresses for currently registered partners:
+
+```bash
+set -a
+source .env
+python -m bakedboston_optimizer.sync_locations
+```
+
+The app's write-back endpoint checks registration again before accepting each result.
+
 API keys must remain server-side and must never be committed. Copy `.env.example` to `.env` only in a secure local environment.
 
 ## Roadmap
