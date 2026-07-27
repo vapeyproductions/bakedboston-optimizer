@@ -22,6 +22,16 @@ class OrganizationRecord:
     longitude: float | None
     schedule: dict[str, Any]
 
+    @property
+    def optimization_eligible(self) -> bool:
+        """Only administrator-confirmed Google locations may enter route models."""
+        return (
+            self.address_validation_status == AddressValidationStatus.VALIDATED.value
+            and self.latitude is not None
+            and self.longitude is not None
+            and bool(self.google_place_id)
+        )
+
     def location(self, google: GoogleMapsProvider | None = None) -> Location:
         if self.latitude is not None and self.longitude is not None:
             try:
@@ -51,6 +61,14 @@ class NetworkSnapshot:
     availability_pauses: tuple[dict[str, Any], ...]
     schedule_exceptions: tuple[dict[str, Any], ...]
     routes: tuple[dict[str, Any], ...]
+
+    @property
+    def eligible_bakeries(self) -> tuple[OrganizationRecord, ...]:
+        return tuple(organization for organization in self.bakeries if organization.optimization_eligible)
+
+    @property
+    def eligible_pantries(self) -> tuple[OrganizationRecord, ...]:
+        return tuple(organization for organization in self.pantries if organization.optimization_eligible)
 
 
 class BakedBostonNetworkClient:

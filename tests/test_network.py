@@ -32,6 +32,8 @@ class NetworkTests(unittest.TestCase):
         bakery = snapshot.bakeries[0]
         self.assertEqual(bakery.location().formatted_address, "1 Main St, Boston, MA 02110, USA")
         self.assertEqual(bakery.schedule["readyTime"], "{}")
+        self.assertTrue(bakery.optimization_eligible)
+        self.assertEqual(snapshot.eligible_bakeries, snapshot.bakeries)
 
     def test_missing_coordinates_require_geocoding(self) -> None:
         snapshot = parse_snapshot({
@@ -44,6 +46,7 @@ class NetworkTests(unittest.TestCase):
         })
         with self.assertRaisesRegex(ValueError, "needs geocoding"):
             snapshot.bakeries[0].location()
+        self.assertEqual(snapshot.eligible_bakeries, ())
 
 
 if __name__ == "__main__":

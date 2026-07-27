@@ -86,6 +86,8 @@ python -m bakedboston_optimizer.sync_locations
 
 The app's write-back endpoint checks registration again before accepting each result.
 
+The feed retains registered locations that still need validation or administrator review so the sync process can find them. Route models must use `snapshot.eligible_bakeries` and `snapshot.eligible_pantries`; those collections contain only administrator-confirmed Google locations.
+
 API keys must remain server-side and must never be committed. Copy `.env.example` to `.env` only in a secure local environment.
 
 ## Roadmap
