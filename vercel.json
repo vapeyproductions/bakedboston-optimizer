@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/recommendations.py": {
+      "maxDuration": 30
+    }
+  }
+}
