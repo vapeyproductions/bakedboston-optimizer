@@ -167,5 +167,6 @@ def _pantry(item: dict[str, Any]) -> OrganizationRecord:
         "openTime": item.get("openTime", ""),
         "closeTime": item.get("closeTime", ""),
         "latestPermittedArrival": item.get("latestPermittedArrival", ""),
+        "serviceModes": item.get("serviceModes", "[]"),
         "deliveriesSevenDays": item.get("deliveriesSevenDays", 0),
     })

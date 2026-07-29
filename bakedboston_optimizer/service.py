@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+import json
+from datetime import date, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .google_maps import GoogleMapsProvider
 from .models import AddressValidationStatus, BakeryPickup, DriverRequest, Location, Pantry
@@ -33,10 +35,11 @@ def recommend(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "generatedAt": datetime.now().astimezone().isoformat(),
         "routes": [{
-            "pickupId": route.bakery_id,
+            "pickupId": int(route.bakery_id),
             "bakeryName": route.bakery_name,
-            "pantryId": route.pantry_id.split(":", 1)[0],
+            "pantryId": int(route.pantry_id.split(":", 1)[0]),
             "pantryName": route.pantry_name,
+            "pantryServiceMode": _service_mode(snapshot, route.pantry_id),
             "departAt": route.depart_at.isoformat(),
             "pickupAt": route.pickup_at.isoformat(),
             "pantryArrivalAt": route.pantry_arrival_at.isoformat(),
@@ -48,6 +51,17 @@ def recommend(payload: dict[str, Any]) -> dict[str, Any]:
             "explanation": list(route.explanation),
         } for route in routes[:10]],
     }
+
+
+def _service_mode(snapshot: NetworkSnapshot, pantry_window_id: str) -> str:
+    parts = pantry_window_id.split(":")
+    if len(parts) > 2 and parts[1] == "recurring":
+        return parts[-1] if parts[-1] in {"staffed", "unattended"} else "staffed"
+    _, _, window_id = pantry_window_id.partition(":")
+    for window in snapshot.availability_windows:
+        if str(window.get("id")) == window_id:
+            return str(window.get("serviceMode") or "staffed")
+    return "staffed"
 
 
 def _network() -> NetworkSnapshot:
@@ -108,7 +122,59 @@ def _pantries(snapshot: NetworkSnapshot, earliest: datetime, latest: datetime) -
             latest_permitted_arrival=latest_arrival,
             priority_score=1 / (1 + deliveries),
         ))
+    for pantry in pantries.values():
+        results.extend(_recurring_pantry_windows(pantry, earliest, latest))
     return results
+
+
+def _recurring_pantry_windows(record: Any, earliest: datetime, latest: datetime) -> list[Pantry]:
+    try:
+        opens = json.loads(record.schedule.get("openTime") or "[]")
+        closes = json.loads(record.schedule.get("closeTime") or "[]")
+        arrivals = json.loads(record.schedule.get("latestPermittedArrival") or "[]")
+        modes = json.loads(record.schedule.get("serviceModes") or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(opens, list) or not isinstance(closes, list) or not isinstance(arrivals, list):
+        return []
+    eastern = ZoneInfo("America/New_York")
+    first = earliest.astimezone(eastern).date()
+    last = latest.astimezone(eastern).date() + timedelta(days=1)
+    deliveries = float(record.schedule.get("deliveriesSevenDays", 0) or 0)
+    results: list[Pantry] = []
+    current = first
+    while current <= last:
+        day = current.strftime("%a")
+        for index, opening in enumerate(opens):
+            if opening.get("day") != day or index >= len(closes) or index >= len(arrivals):
+                continue
+            if opening.get("recurrence") == "monthly" and opening.get("ordinal") != (current.day - 1) // 7 + 1:
+                continue
+            starts = _local_datetime(current, opening.get("time"), eastern)
+            ends = _local_datetime(current, closes[index].get("time"), eastern)
+            latest_arrival = _local_datetime(current, arrivals[index].get("time"), eastern)
+            if not starts or not ends or not latest_arrival or ends < earliest or starts > latest:
+                continue
+            mode = modes[index].get("mode", "staffed") if index < len(modes) and isinstance(modes[index], dict) else "staffed"
+            results.append(Pantry(
+                id=f"{record.id}:recurring:{current.isoformat()}:{index}:{mode}",
+                pantry_name=record.name,
+                location=record.location(),
+                receiving_start=starts,
+                receiving_end=ends,
+                latest_permitted_arrival=latest_arrival,
+                priority_score=1 / (1 + deliveries),
+            ))
+        current += timedelta(days=1)
+    return results
+
+
+def _local_datetime(day: date, value: Any, zone: ZoneInfo) -> datetime | None:
+    try:
+        parsed = time.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return datetime.combine(day, parsed, tzinfo=zone)
 
 
 def _datetime(value: str) -> datetime:
