@@ -22,8 +22,8 @@ def rank_routes(
     request: DriverRequest,
     travel: TravelTimeProvider,
     weights: OptimizationWeights = OptimizationWeights(),
-    pickup_service_minutes: int = 15,
-    dropoff_service_minutes: int = 15,
+    pickup_service_minutes: int = 5,
+    dropoff_service_minutes: int = 5,
 ) -> list[RouteCandidate]:
     """Generate, filter, score, and rank complete bakery-to-pantry routes."""
 
