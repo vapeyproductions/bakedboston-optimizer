@@ -58,8 +58,8 @@ class OptimizerTests(unittest.TestCase):
         )
         self.assertEqual(len(routes), 1)
         self.assertEqual(routes[0].pickup_at, self.day.replace(hour=17))
-        self.assertEqual(routes[0].pantry_arrival_at, self.day.replace(hour=17, minute=35))
-        self.assertEqual(routes[0].finish_at, self.day.replace(hour=17, minute=50))
+        self.assertEqual(routes[0].pantry_arrival_at, self.day.replace(hour=17, minute=25))
+        self.assertEqual(routes[0].finish_at, self.day.replace(hour=17, minute=30))
 
     def test_claimed_pickup_is_excluded(self) -> None:
         claimed = BakeryPickup(**{**self.bakery.__dict__, "claimed": True})

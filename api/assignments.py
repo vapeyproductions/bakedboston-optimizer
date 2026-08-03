@@ -6,23 +6,14 @@ import os
 from http.server import BaseHTTPRequestHandler
 
 from bakedboston_optimizer.assignment_service import assign
-from bakedboston_optimizer.service import recommend
 
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        if self.path.rstrip("/").endswith("/assignments"):
-            self._json(200, {
-                "service": "BakedBoston Batch Assignment",
-                "status": "ok",
-                "model": "two-stage-mip-v1",
-            })
-            return
         self._json(200, {
-            "service": "BakedBoston Optimizer",
+            "service": "BakedBoston Batch Assignment",
             "status": "ok",
-            "recommendationModel": "route-ranking-v1",
-            "batchModel": "two-stage-mip-v1",
+            "model": "two-stage-mip-v1",
         })
 
     def do_POST(self) -> None:
@@ -34,12 +25,11 @@ class handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length))
-            operation = assign if self.path.rstrip("/").endswith("/assignments") else recommend
-            self._json(200, operation(payload))
+            self._json(200, assign(payload))
         except (KeyError, TypeError, ValueError) as error:
             self._json(400, {"error": str(error)})
         except Exception:
-            self._json(500, {"error": "The optimizer could not complete the requested operation."})
+            self._json(500, {"error": "The optimizer could not allocate routes."})
 
     def _json(self, status: int, payload: dict[str, object]) -> None:
         body = json.dumps(payload).encode()

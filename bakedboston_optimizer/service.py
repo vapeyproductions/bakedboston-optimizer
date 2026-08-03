@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from .google_maps import GoogleMapsProvider
 from .models import AddressValidationStatus, BakeryPickup, DriverRequest, Location, Pantry
 from .network import BakedBostonNetworkClient, NetworkSnapshot
-from .optimizer import rank_routes
+from .optimizer import OptimizationWeights, rank_routes
 from .travel import HaversineTravelTimeProvider
 
 
@@ -25,15 +25,31 @@ def recommend(payload: dict[str, Any]) -> dict[str, Any]:
     snapshot = _network()
     pickups = _pickups(snapshot, earliest, latest)
     pantries = _pantries(snapshot, earliest, latest)
-    travel = GoogleMapsProvider(os.environ["GOOGLE_MAPS_API_KEY"]) if os.getenv("GOOGLE_MAPS_API_KEY") else HaversineTravelTimeProvider()
+    google_maps_configured = bool(os.getenv("GOOGLE_MAPS_API_KEY"))
+    travel = GoogleMapsProvider(os.environ["GOOGLE_MAPS_API_KEY"]) if google_maps_configured else HaversineTravelTimeProvider()
+    weights = OptimizationWeights()
     routes = rank_routes(
         pickups,
         pantries,
         DriverRequest(earliest_start=earliest, latest_finish=latest, start_location=start, preferred_destination=preferred),
         travel,
+        weights,
     )
     return {
         "generatedAt": datetime.now().astimezone().isoformat(),
+        "model": {
+            "name": "bakedboston-route-ranking",
+            "version": "1.0",
+            "travelProvider": "google_routes_traffic" if google_maps_configured else "haversine_fallback",
+            "pickupServiceMinutes": 5,
+            "dropoffServiceMinutes": 5,
+            "weights": {
+                "pantryPriorityReward": weights.pantry_priority_reward,
+                "driveMinutePenalty": weights.drive_minute_penalty,
+                "waitingMinutePenalty": weights.waiting_minute_penalty,
+                "destinationMinutePenalty": weights.destination_minute_penalty,
+            },
+        },
         "routes": [{
             "pickupId": int(route.bakery_id),
             "bakeryName": route.bakery_name,
@@ -100,6 +116,11 @@ def _pickups(snapshot: NetworkSnapshot, earliest: datetime, latest: datetime) ->
 
 def _pantries(snapshot: NetworkSnapshot, earliest: datetime, latest: datetime) -> list[Pantry]:
     pantries = {record.id: record for record in snapshot.eligible_pantries}
+    confirmed_keys = {
+        str(item.get("actionKey") or "")
+        for item in snapshot.pantry_window_confirmations
+        if item.get("acknowledgedAt")
+    }
     results: list[Pantry] = []
     for item in snapshot.availability_windows:
         if item.get("organizationType") != "pantry" or item.get("paused"):
@@ -110,6 +131,15 @@ def _pantries(snapshot: NetworkSnapshot, earliest: datetime, latest: datetime) -
         starts = _datetime(item["startsAt"])
         ends = _datetime(item["endsAt"])
         latest_arrival = _datetime(item["latestArrival"])
+        if _schedule_exception(snapshot, pantry.id, starts):
+            continue
+        starts = _resume_after_pause(snapshot, pantry.id, starts, ends)
+        if starts is None:
+            continue
+        service_mode = str(item.get("serviceMode") or "staffed")
+        confirmation_key = f"pantry-open:{pantry.id}:one-time:{item['id']}"
+        if service_mode == "staffed" and confirmation_key not in confirmed_keys:
+            continue
         if ends < earliest or starts > latest:
             continue
         deliveries = float(pantry.schedule.get("deliveriesSevenDays", 0) or 0)
@@ -123,11 +153,17 @@ def _pantries(snapshot: NetworkSnapshot, earliest: datetime, latest: datetime) -
             priority_score=1 / (1 + deliveries),
         ))
     for pantry in pantries.values():
-        results.extend(_recurring_pantry_windows(pantry, earliest, latest))
+        results.extend(_recurring_pantry_windows(pantry, earliest, latest, snapshot, confirmed_keys))
     return results
 
 
-def _recurring_pantry_windows(record: Any, earliest: datetime, latest: datetime) -> list[Pantry]:
+def _recurring_pantry_windows(
+    record: Any,
+    earliest: datetime,
+    latest: datetime,
+    snapshot: NetworkSnapshot,
+    confirmed_keys: set[str],
+) -> list[Pantry]:
     try:
         opens = json.loads(record.schedule.get("openTime") or "[]")
         closes = json.loads(record.schedule.get("closeTime") or "[]")
@@ -155,7 +191,15 @@ def _recurring_pantry_windows(record: Any, earliest: datetime, latest: datetime)
             latest_arrival = _local_datetime(current, arrivals[index].get("time"), eastern)
             if not starts or not ends or not latest_arrival or ends < earliest or starts > latest:
                 continue
+            if _schedule_exception(snapshot, record.id, starts):
+                continue
+            starts = _resume_after_pause(snapshot, record.id, starts, ends)
+            if starts is None:
+                continue
             mode = modes[index].get("mode", "staffed") if index < len(modes) and isinstance(modes[index], dict) else "staffed"
+            confirmation_key = f"pantry-open:{record.id}:recurring:{current.isoformat()}:{index}"
+            if mode == "staffed" and confirmation_key not in confirmed_keys:
+                continue
             results.append(Pantry(
                 id=f"{record.id}:recurring:{current.isoformat()}:{index}:{mode}",
                 pantry_name=record.name,
@@ -167,6 +211,33 @@ def _recurring_pantry_windows(record: Any, earliest: datetime, latest: datetime)
             ))
         current += timedelta(days=1)
     return results
+
+
+def _schedule_exception(snapshot: NetworkSnapshot, pantry_id: int, value: datetime) -> bool:
+    local_date = value.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    return any(
+        item.get("organizationType") == "pantry"
+        and int(item.get("organizationId", -1)) == pantry_id
+        and item.get("exceptionDate") == local_date
+        for item in snapshot.schedule_exceptions
+    )
+
+
+def _resume_after_pause(
+    snapshot: NetworkSnapshot,
+    pantry_id: int,
+    starts: datetime,
+    ends: datetime,
+) -> datetime | None:
+    resumes_at = starts
+    for item in snapshot.availability_pauses:
+        if item.get("organizationType") != "pantry" or int(item.get("organizationId", -1)) != pantry_id:
+            continue
+        pause_start = _datetime(item["createdAt"]) if item.get("createdAt") else starts
+        pause_end = _datetime(item["endsAt"])
+        if pause_start <= ends and pause_end >= resumes_at:
+            resumes_at = max(resumes_at, pause_end)
+    return None if resumes_at > ends else resumes_at
 
 
 def _local_datetime(day: date, value: Any, zone: ZoneInfo) -> datetime | None:

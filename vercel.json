@@ -2,6 +2,9 @@
   "functions": {
     "api/recommendations.py": {
       "maxDuration": 30
+    },
+    "api/assignments.py": {
+      "maxDuration": 30
     }
   }
 }
