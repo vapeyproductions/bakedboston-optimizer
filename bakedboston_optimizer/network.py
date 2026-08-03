@@ -64,6 +64,7 @@ class NetworkSnapshot:
     pickup_occurrences: tuple[dict[str, Any], ...]
     ride_requests: tuple[dict[str, Any], ...]
     route_offers: tuple[dict[str, Any], ...]
+    pantry_window_confirmations: tuple[dict[str, Any], ...]
 
     @property
     def eligible_bakeries(self) -> tuple[OrganizationRecord, ...]:
@@ -121,10 +122,11 @@ class BakedBostonNetworkClient:
 
 
 def parse_snapshot(payload: dict[str, Any]) -> NetworkSnapshot:
-    if payload.get("schemaVersion") != 1:
+    schema_version = int(payload.get("schemaVersion", 0))
+    if schema_version not in {1, 2}:
         raise ValueError(f"Unsupported optimizer feed schema: {payload.get('schemaVersion')}")
     return NetworkSnapshot(
-        schema_version=1,
+        schema_version=schema_version,
         generated_at=datetime.fromisoformat(payload["generatedAt"].replace("Z", "+00:00")),
         bakeries=tuple(_bakery(item) for item in payload.get("bakeries", [])),
         pantries=tuple(_pantry(item) for item in payload.get("pantries", [])),
@@ -135,6 +137,7 @@ def parse_snapshot(payload: dict[str, Any]) -> NetworkSnapshot:
         pickup_occurrences=tuple(payload.get("pickupOccurrences", [])),
         ride_requests=tuple(payload.get("rideRequests", [])),
         route_offers=tuple(payload.get("routeOffers", [])),
+        pantry_window_confirmations=tuple(payload.get("pantryWindowConfirmations", [])),
     )
 
 
