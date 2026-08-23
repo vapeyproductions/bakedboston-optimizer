@@ -115,14 +115,17 @@ vary; selected assignments and synthetic events should not.
 
 The comparison report includes:
 
-- food-available pickup coverage and unserved pickups;
-- completed deliveries and unique pantries served;
-- fraction of open pantries never served;
-- Gini coefficient of service across pantries;
-- mean drive, waiting, preferred-destination, and total route-burden minutes;
-- offers, rejections, likely rejections, and acceptance rate;
-- feasible candidates examined; and
-- Gurobi runtime and MIP gap.
+- bakery pickup coverage and unserved food-available pickup occurrences;
+- completed deliveries;
+- pantry coverage as both a count and percentage;
+- pantries never served as both a count and percentage;
+- distribution fairness as a pantry-service Gini coefficient and service gap;
+- mean drive time, distance, waiting time, preferred-destination deviation, and
+  total trip duration;
+- offers, accepted routes, simulated rejections, expected acceptance, likely
+  rejections, and likely-rejection rate;
+- feasible candidates examined and the declared system-objective value; and
+- Gurobi runtime, solve status, and MIP gap.
 
 The standard experiment evaluates 3-, 4-, and 5-day horizons, optionally over
 multiple random seeds, and reports the mean of every metric for each policy.
@@ -142,7 +145,12 @@ more food-available bakery occurrences than drivers, overlapping pantry windows,
 different geography, and multiple defensible routing choices. This prevents a
 trivial case in which every policy makes the same assignment.
 
-For the fixed seed used by the regression suite, BakedBoston's Gurobi policy has
-the greatest total route quality. Individual baselines can still have a lower
-mean drive time or a lower Gini coefficient in a particular horizon; those are
-reported as real tradeoffs rather than hidden by the objective score.
+The bundled five-day public replay contains nine fictional bakeries, nine
+fictional pantries, and sixty driver requests, with no more than three drivers
+entering one decision epoch. For the fixed seed used by the regression suite,
+BakedBoston's Gurobi policy has the greatest declared system-objective value and
+completes every eligible pickup. The highest-priority baseline can produce the
+lowest Gini coefficient while leaving a pickup unserved, and the earliest or
+shortest policy can reduce a route-burden component while serving fewer unique
+pantries. These are real tradeoffs, so the dashboard highlights the best value
+in each column instead of implying that the MIP must dominate every metric.

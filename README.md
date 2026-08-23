@@ -73,7 +73,10 @@ excluded merely for having received food.
 ## Reproducible rolling-horizon comparison
 
 The primary academic experiment compares BakedBoston with five transparent
-baselines over identical 3-, 4-, and 5-day seeded scenarios:
+baselines over identical 3-, 4-, and 5-day seeded scenarios. The bundled public
+replay uses a five-day horizon, nine fictional bakeries, nine fictional
+pantries, sixty driver requests, and at most three drivers entering any one
+decision epoch:
 
 ```bash
 python3 -m bakedboston_optimizer.compare \
@@ -81,13 +84,17 @@ python3 -m bakedboston_optimizer.compare \
   --start-date 2026-08-24 \
   --horizons 3,4,5 \
   --seeds 2026,2027,2028 \
-  --drivers-per-day 3 \
+  --drivers-per-day 12 \
+  --max-simultaneous-drivers 3 \
   --output comparison-result.json \
   --summary-csv comparison-summary.csv
 ```
 
-Add `--disable-acceptance` to measure pure routing capacity, or leave the
-transparent seeded acceptance model enabled to estimate likely completions.
+Use `--disable-acceptance` for the deterministic routing-capacity comparison
+shown on the public simulator: every driver selects the highest-scoring route
+in their conflict-free recommendation list. A transparent behavioral model can
+also be enabled as a separate sensitivity analysis; its expected acceptance and
+likely-rejection measures are diagnostics rather than observed behavior.
 `--matching-interval-minutes` controls how closely arriving drivers are grouped
 into one network-wide Gurobi solve. The JSON contains the complete auditable
 event trace; the CSV contains one analysis-ready row per horizon and policy.
@@ -98,12 +105,14 @@ receives the same feasible routes and the same synthetic events. The detailed
 protocol and metric definitions are in
 [docs/simulation.md](docs/simulation.md).
 
-The bundled academic comparison fixture is deliberately contention-rich: five
-fictional bakeries, five fictional pantries, and fewer drivers than available
+The bundled academic comparison fixture is deliberately contention-rich: nine
+fictional bakeries, nine fictional pantries, and fewer drivers than available
 pickups force the policies to make meaningfully different choices. A fixed-seed
-regression test verifies that the Gurobi policy attains the highest total route
-quality in this demonstration while the metrics still expose tradeoffs in
-distance and equity.
+regression test verifies that the Gurobi policy attains the highest declared
+system-objective value in this demonstration while the metrics still expose
+tradeoffs in completion, distance, pantry reach, and equity. A baseline may
+legitimately win an individual column; the MIP is optimal for its stated
+lexicographic objective, not for every evaluation measure simultaneously.
 
 ## Driver recommendation trace
 
@@ -130,7 +139,8 @@ python3 -m bakedboston_optimizer.web_export \
   --start-date 2026-08-24 \
   --days 5 \
   --seed 2026 \
-  --drivers-per-day 7 \
+  --drivers-per-day 12 \
+  --max-simultaneous-drivers 3 \
   --output simulation-data.json
 ```
 
@@ -182,13 +192,30 @@ matching and has no write path.
 
 Each report includes:
 
-- feasible candidate count and selected assignments;
-- matched and missed hypothetical pickups;
-- pickup coverage;
-- pantry opportunity coverage and unique pantries served;
-- average driving and waiting time;
-- Gurobi status, runtime, route quality, and MIP gap when available;
-- a timestamped event log for replay in the demonstration UI.
+- **bakery pickup coverage:** eligible food-ready pickup occurrences completed;
+- **completed deliveries:** successful bakery-to-pantry assignments;
+- **pantry coverage:** unique and percentage of available pantries served;
+- **pantries never served:** count and fraction receiving no delivery;
+- **distribution fairness:** pantry-service Gini coefficient and service gap;
+- **mean route burden:** driving minutes, distance, waiting time, preferred-
+  destination deviation, and total trip duration;
+- **unserved pickups:** food-ready windows that expired without assignment;
+- **driver acceptance:** deterministic selected-route share in the public replay,
+  plus expected acceptance under the optional behavioral assumption;
+- **rejection diagnostics:** predicted likely-rejected offer count and rate;
+- **computational performance:** Gurobi runtime, status, and optimality gap;
+- **objective evidence:** total declared system-objective value and feasible
+  candidate count; and
+- a timestamped event log containing every route recommended to each driver and
+  the rank-1 route selected.
+
+No policy is expected to win every column. A highest-priority-first rule can,
+for example, produce a lower pantry-service Gini coefficient while leaving an
+eligible pickup unserved. A shortest-route rule can minimize driving while
+repeatedly serving fewer pantries. The MIP is evaluated against its declared
+lexicographic objective: first maximize completed pickups, then maximize total
+route quality across simultaneous drivers subject to assignment and timing
+constraints.
 
 ## Repository structure
 

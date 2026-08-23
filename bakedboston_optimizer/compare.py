@@ -89,6 +89,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Group driver arrivals into decision epochs of this size (default: 15)",
     )
     parser.add_argument(
+        "--max-simultaneous-drivers",
+        type=int,
+        choices=(2, 3),
+        default=3,
+        help="Cap each decision epoch at two or three drivers (default: 3)",
+    )
+    parser.add_argument(
         "--disable-acceptance",
         action="store_true",
         help="Treat every selected route as accepted for a pure routing-capacity experiment",
@@ -120,6 +127,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         bakery_food_probability=args.bakery_food_probability,
         staffed_pantry_open_probability=args.staffed_pantry_open_probability,
         matching_interval_minutes=args.matching_interval_minutes,
+        max_simultaneous_drivers=args.max_simultaneous_drivers,
         acceptance_enabled=not args.disable_acceptance,
         travel=HaversineTravelTimeProvider(),
     )

@@ -121,8 +121,9 @@ def build_web_payload(
     start_date: date,
     days: int = 5,
     seed: int = 2026,
-    drivers_per_day: int = 7,
-    matching_interval_minutes: int = 120,
+    drivers_per_day: int = 12,
+    matching_interval_minutes: int = 60,
+    max_simultaneous_drivers: int = 3,
     weights: OptimizationWeights = OptimizationWeights(),
 ) -> dict[str, Any]:
     """Create the deterministic Gurobi-backed payload replayed by the website."""
@@ -139,6 +140,7 @@ def build_web_payload(
                 staffed_pantry_open_probability=0.90,
             ),
             matching_interval_minutes=matching_interval_minutes,
+            max_simultaneous_drivers=max_simultaneous_drivers,
             acceptance_enabled=False,
         ),
         policies=DEFAULT_POLICIES,
@@ -147,7 +149,7 @@ def build_web_payload(
     )
     payload = _compact_comparison(comparison.as_dict())
     payload.update({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "displayMode": "interactive_replay_of_precomputed_gurobi_experiment",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "sourceSnapshotGeneratedAt": snapshot.generated_at.isoformat(),
@@ -158,6 +160,17 @@ def build_web_payload(
             "After the joint Gurobi solve resolves simultaneous-driver conflicts, "
             "each driver's conflict-free recommendations are ranked and rank 1 is selected."
         ),
+        "metricMethodology": {
+            "actualSelection": "Every simulated driver selects recommendation rank 1.",
+            "acceptanceModel": (
+                "Expected acceptance and likely-rejection measures are prediction-based diagnostics; "
+                "they do not override the deterministic rank-1 selection used in this demonstration."
+            ),
+            "comparison": (
+                "Policies share identical synthetic surplus, pantry, and driver events. A policy may "
+                "win an individual metric without maximizing the BakedBoston lexicographic objective."
+            ),
+        },
     })
     return payload
 
@@ -171,8 +184,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--start-date", type=date.fromisoformat, default=date(2026, 8, 24))
     parser.add_argument("--days", type=int, default=5)
     parser.add_argument("--seed", type=int, default=2026)
-    parser.add_argument("--drivers-per-day", type=int, default=7)
-    parser.add_argument("--matching-interval-minutes", type=int, default=120)
+    parser.add_argument("--drivers-per-day", type=int, default=12)
+    parser.add_argument("--matching-interval-minutes", type=int, default=60)
+    parser.add_argument("--max-simultaneous-drivers", type=int, choices=(2, 3), default=3)
     args = parser.parse_args(argv)
 
     raw = json.loads(args.scenario.read_text())
@@ -185,6 +199,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         seed=args.seed,
         drivers_per_day=args.drivers_per_day,
         matching_interval_minutes=args.matching_interval_minutes,
+        max_simultaneous_drivers=args.max_simultaneous_drivers,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2) + "\n")

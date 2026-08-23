@@ -70,10 +70,13 @@ class ExperimentConfig:
     acceptance_drive_penalty: float = 0.045
     acceptance_wait_penalty: float = 0.030
     acceptance_destination_penalty: float = 0.035
+    max_simultaneous_drivers: int = 3
 
     def __post_init__(self) -> None:
         if self.matching_interval_minutes < 1:
             raise ValueError("matching_interval_minutes must be at least 1")
+        if self.max_simultaneous_drivers not in (2, 3):
+            raise ValueError("max_simultaneous_drivers must be 2 or 3")
         for name, value in (
             ("acceptance_drive_penalty", self.acceptance_drive_penalty),
             ("acceptance_wait_penalty", self.acceptance_wait_penalty),
@@ -115,6 +118,7 @@ class ExperimentScenario:
             "horizonDays": self.config.simulation.days,
             "timezone": self.config.simulation.timezone,
             "matchingIntervalMinutes": self.config.matching_interval_minutes,
+            "maxSimultaneousDrivers": self.config.max_simultaneous_drivers,
             "acceptanceEnabled": self.config.acceptance_enabled,
             "driversPerDay": self.config.simulation.drivers_per_day,
             "bakeryFoodProbability": self.config.simulation.bakery_food_probability,
@@ -144,6 +148,8 @@ class ExperimentAssignment:
     pantry_priority: float
     route_score: float
     acceptance_probability: float
+    distance_miles: float
+    total_trip_minutes: float
     accepted: bool
 
     def as_dict(self) -> dict[str, Any]:
@@ -164,6 +170,8 @@ class ExperimentAssignment:
             "pantryPriority": round(self.pantry_priority, 4),
             "routeScore": round(self.route_score, 4),
             "acceptanceProbability": round(self.acceptance_probability, 4),
+            "distanceMiles": round(self.distance_miles, 3),
+            "totalTripMinutes": round(self.total_trip_minutes, 3),
             "accepted": self.accepted,
         }
 
@@ -185,6 +193,12 @@ class ExperimentCandidate:
     destination_minutes: float
     pantry_priority: float
     route_score: float
+    acceptance_probability: float
+    distance_miles: float
+    total_trip_minutes: float
+    driver_start: tuple[float, float]
+    bakery_location: tuple[float, float]
+    pantry_location: tuple[float, float]
     recommendation_rank: int | None
     selected: bool
     accepted: bool | None
@@ -204,6 +218,12 @@ class ExperimentCandidate:
             "destinationMinutes": round(self.destination_minutes, 3),
             "pantryPriority": round(self.pantry_priority, 4),
             "routeScore": round(self.route_score, 4),
+            "acceptanceProbability": round(self.acceptance_probability, 4),
+            "distanceMiles": round(self.distance_miles, 3),
+            "totalTripMinutes": round(self.total_trip_minutes, 3),
+            "driverStart": _coordinate_dict(self.driver_start),
+            "bakeryLocation": _coordinate_dict(self.bakery_location),
+            "pantryLocation": _coordinate_dict(self.pantry_location),
             "recommended": self.recommendation_rank is not None,
             "recommendationRank": self.recommendation_rank,
             "selected": self.selected,
@@ -248,6 +268,18 @@ class DecisionEpochResult:
                     "earliestStart": request.earliest_start.isoformat(),
                     "latestFinish": request.latest_finish.isoformat(),
                     "hasPreferredDestination": request.preferred_destination is not None,
+                    "startLocation": {
+                        "latitude": request.start_location.latitude,
+                        "longitude": request.start_location.longitude,
+                    },
+                    "preferredDestination": (
+                        {
+                            "latitude": request.preferred_destination.latitude,
+                            "longitude": request.preferred_destination.longitude,
+                        }
+                        if request.preferred_destination is not None
+                        else None
+                    ),
                 }
                 for request in self.requests
             ],
@@ -307,41 +339,70 @@ class PolicyReport:
         open_pantries = sum(day.open_pantry_windows for day in self.days)
         pantry_counts = [item["served"] for item in self.pantry_opportunities.values()]
         never_served = sum(1 for count in pantry_counts if count == 0)
+        available_pantry_count = len(pantry_counts)
+        unique_pantries_served = len({item.pantry_name for item in completed})
+        service_gap = (max(pantry_counts) - min(pantry_counts)) if pantry_counts else 0
         runtimes = [run.runtime_seconds for day in self.days for run in day.solver_runs]
         gaps = [run.mip_gap for day in self.days for run in day.solver_runs if run.mip_gap is not None]
+        expected_acceptances = sum(item.acceptance_probability for item in offers)
+        likely_rejections = sum(item.acceptance_probability < 0.5 for item in offers)
+        total_route_quality = sum(item.route_score for item in completed)
         return {
             "scheduledPickupWindows": sum(day.scheduled_pickup_windows for day in self.days),
+            "eligibleBakeryPickupOccurrences": food_pickups,
             "foodAvailablePickups": food_pickups,
             "completedDeliveries": len(completed),
+            "bakeryPickupCoverage": _ratio(len(completed), food_pickups),
             "pickupCoverage": _ratio(len(completed), food_pickups),
             "unservedPickups": max(0, food_pickups - len(completed)),
             "routesOffered": len(offers),
             "routesRejected": len(offers) - len(completed),
+            "driverAcceptanceRate": _ratio(len(completed), len(offers)),
             "acceptanceRate": _ratio(len(completed), len(offers)),
-            "offersLikelyRejected": sum(item.acceptance_probability < 0.5 for item in offers),
+            "expectedDriverAcceptanceRate": round(
+                expected_acceptances / len(offers), 4
+            ) if offers else 0.0,
+            "expectedRejectedOffers": round(len(offers) - expected_acceptances, 3),
+            "offersLikelyRejected": likely_rejections,
+            "likelyRejectionRate": _ratio(likely_rejections, len(offers)),
             "feasibleCandidatesEvaluated": sum(day.feasible_candidates for day in self.days),
             "openPantryWindows": open_pantries,
-            "uniquePantriesServed": len({item.pantry_name for item in completed}),
+            "availablePantries": available_pantry_count,
+            "uniquePantriesServed": unique_pantries_served,
+            "pantryCoverageCount": unique_pantries_served,
+            "pantryCoveragePercentage": _ratio(
+                unique_pantries_served, available_pantry_count
+            ),
+            "pantriesNeverServedCount": never_served,
+            "pantriesNeverServedPercentage": _ratio(
+                never_served, available_pantry_count
+            ),
             "fractionOpenPantriesNeverServed": _ratio(never_served, len(pantry_counts)),
             "pantryServiceGini": round(gini(pantry_counts), 4),
+            "pantryServiceGap": service_gap,
             "averageDriveMinutes": _mean(item.drive_minutes for item in completed),
+            "averageDistanceMiles": _mean(item.distance_miles for item in completed),
             "averageWaitingMinutes": _mean(item.waiting_minutes for item in completed),
             "averageDestinationMinutes": _mean(item.destination_minutes for item in completed),
+            "averageTotalTripDurationMinutes": _mean(
+                item.total_trip_minutes for item in completed
+            ),
             "averageRouteBurdenMinutes": _mean(
-                item.drive_minutes + item.waiting_minutes + item.destination_minutes
-                for item in completed
+                item.total_trip_minutes for item in completed
             ),
             "averagePantryPriorityServed": _mean(
                 (item.pantry_priority for item in completed),
                 digits=4,
             ),
-            "totalRouteQuality": round(sum(item.route_score for item in completed), 4),
+            "systemObjectiveValue": round(total_route_quality, 4),
+            "totalRouteQuality": round(total_route_quality, 4),
             "averageRouteQuality": _mean(
                 (item.route_score for item in completed),
                 digits=4,
             ),
             "totalSolverRuntimeSeconds": round(sum(runtimes), 6),
             "averageSolverRuntimeSeconds": _mean(runtimes, digits=6),
+            "averageOptimalityGap": _mean(gaps, digits=6) if gaps else None,
             "maximumMipGap": round(max(gaps), 6) if gaps else None,
         }
 
@@ -435,6 +496,7 @@ def build_scenario(
             pantries,
             simulation.drivers_per_day,
             config.matching_interval_minutes,
+            config.max_simultaneous_drivers,
             rng,
         )
         days.append(ScenarioDay(
@@ -467,6 +529,9 @@ def run_policy(
 
     for day in scenario.days:
         available_pickups = {pickup.id: pickup for pickup in day.pickups}
+        pickup_by_id = {pickup.id: pickup for pickup in day.pickups}
+        pantry_by_id = {pantry.id: pantry for pantry in day.pantries}
+        request_by_id = {request.id: request for request in day.requests}
         offers: list[ExperimentAssignment] = []
         diagnostics: list[SolverDiagnostics] = []
         decision_epochs: list[DecisionEpochResult] = []
@@ -535,6 +600,9 @@ def run_policy(
                     day.service_date,
                     epoch,
                     candidate,
+                    request_by_id[candidate.request_id],
+                    pickup_by_id[candidate.route.bakery_id],
+                    pantry_by_id[candidate.route.pantry_id],
                     probability,
                     accepted,
                 ))
@@ -548,6 +616,12 @@ def run_policy(
                 candidates=tuple(
                     _experiment_candidate(
                         candidate,
+                        request=request_by_id[candidate.request_id],
+                        pickup=pickup_by_id[candidate.route.bakery_id],
+                        pantry=pantry_by_id[candidate.route.pantry_id],
+                        probability=acceptance_probability(
+                            candidate, scenario.config
+                        ),
                         recommendation_rank=recommendation_ranks.get(
                             _candidate_key(candidate)
                         ),
@@ -638,6 +712,7 @@ def compare_horizons(
     bakery_food_probability: float = 0.75,
     staffed_pantry_open_probability: float = 0.90,
     matching_interval_minutes: int = 15,
+    max_simultaneous_drivers: int = 3,
     acceptance_enabled: bool = True,
     travel: TravelTimeProvider | None = None,
     weights: OptimizationWeights = OptimizationWeights(),
@@ -664,6 +739,7 @@ def compare_horizons(
                 ),
                 matching_interval_minutes=matching_interval_minutes,
                 acceptance_enabled=acceptance_enabled,
+                max_simultaneous_drivers=max_simultaneous_drivers,
             )
             runs.append(compare_policies(
                 snapshot,
@@ -712,19 +788,27 @@ def write_report(report: ComparisonReport | HorizonComparisonReport, path: Path)
 
 
 SUMMARY_CSV_FIELDS: tuple[str, ...] = (
-    "pickupCoverage",
+    "bakeryPickupCoverage",
     "completedDeliveries",
     "unservedPickups",
-    "uniquePantriesServed",
-    "fractionOpenPantriesNeverServed",
+    "pantryCoverageCount",
+    "pantryCoveragePercentage",
+    "pantriesNeverServedPercentage",
     "pantryServiceGini",
+    "pantryServiceGap",
     "averageDriveMinutes",
+    "averageDistanceMiles",
     "averageWaitingMinutes",
-    "averageRouteBurdenMinutes",
-    "totalRouteQuality",
-    "averageRouteQuality",
-    "acceptanceRate",
+    "averageTotalTripDurationMinutes",
+    "systemObjectiveValue",
+    "driverAcceptanceRate",
+    "expectedDriverAcceptanceRate",
+    "likelyRejectionRate",
     "totalSolverRuntimeSeconds",
+    "averageSolverRuntimeSeconds",
+    "averageOptimalityGap",
+    "maximumMipGap",
+    "totalRouteQuality",
 )
 
 
@@ -752,6 +836,7 @@ def _rolling_driver_requests(
     pantries: Sequence[Pantry],
     count: int,
     interval_minutes: int,
+    max_simultaneous_drivers: int,
     rng: random.Random,
 ) -> list[DriverRequest]:
     if not pickups or not pantries:
@@ -760,11 +845,15 @@ def _rolling_driver_requests(
     center_latitude = sum(item.latitude for item in locations) / len(locations)
     center_longitude = sum(item.longitude for item in locations) / len(locations)
     requests: list[DriverRequest] = []
+    epoch_counts: dict[datetime, int] = defaultdict(int)
     offsets = (60, 45, 30, 15, 0)
     for index in range(count):
         pickup_anchor = pickups[index % len(pickups)] if index < len(pickups) else rng.choice(pickups)
         raw_start = pickup_anchor.ready_at - timedelta(minutes=rng.choice(offsets))
         earliest = _floor_epoch(raw_start, interval_minutes)
+        while epoch_counts[earliest] >= max_simultaneous_drivers:
+            earliest += timedelta(minutes=interval_minutes)
+        epoch_counts[earliest] += 1
         latest = earliest + timedelta(minutes=rng.choice((90, 120, 150, 180)))
         start = Location(
             address_entered=f"synthetic-driver-{index + 1}-origin",
@@ -912,6 +1001,9 @@ def _experiment_assignment(
     service_date: date,
     epoch: datetime,
     candidate: AssignmentCandidate,
+    request: DriverRequest,
+    pickup: BakeryPickup,
+    pantry: Pantry,
     probability: float,
     accepted: bool,
 ) -> ExperimentAssignment:
@@ -933,6 +1025,10 @@ def _experiment_assignment(
         pantry_priority=route.pantry_priority,
         route_score=route.score,
         acceptance_probability=probability,
+        distance_miles=_route_distance_miles(request, pickup, pantry),
+        total_trip_minutes=(
+            route.finish_at - route.depart_at
+        ).total_seconds() / 60,
         accepted=accepted,
     )
 
@@ -948,6 +1044,10 @@ def _candidate_key(candidate: AssignmentCandidate) -> tuple[str, str, str]:
 def _experiment_candidate(
     candidate: AssignmentCandidate,
     *,
+    request: DriverRequest,
+    pickup: BakeryPickup,
+    pantry: Pantry,
+    probability: float,
     recommendation_rank: int | None,
     selected: bool,
     accepted: bool | None,
@@ -967,6 +1067,17 @@ def _experiment_candidate(
         destination_minutes=route.destination_minutes,
         pantry_priority=route.pantry_priority,
         route_score=route.score,
+        acceptance_probability=probability,
+        distance_miles=_route_distance_miles(request, pickup, pantry),
+        total_trip_minutes=(
+            route.finish_at - route.depart_at
+        ).total_seconds() / 60,
+        driver_start=(
+            request.start_location.latitude,
+            request.start_location.longitude,
+        ),
+        bakery_location=(pickup.location.latitude, pickup.location.longitude),
+        pantry_location=(pantry.location.latitude, pantry.location.longitude),
         recommendation_rank=recommendation_rank,
         selected=selected,
         accepted=accepted,
@@ -1032,6 +1143,39 @@ def _stable_uniform(seed: int, *parts: str) -> float:
     return integer / float(2**64)
 
 
+def _route_distance_miles(
+    request: DriverRequest,
+    pickup: BakeryPickup,
+    pantry: Pantry,
+) -> float:
+    return _haversine_miles(request.start_location, pickup.location) + _haversine_miles(
+        pickup.location, pantry.location
+    )
+
+
+def _haversine_miles(origin: Location, destination: Location) -> float:
+    radius_miles = 3958.7613
+    origin_latitude = math.radians(origin.latitude)
+    destination_latitude = math.radians(destination.latitude)
+    latitude_delta = math.radians(destination.latitude - origin.latitude)
+    longitude_delta = math.radians(destination.longitude - origin.longitude)
+    value = (
+        math.sin(latitude_delta / 2) ** 2
+        + math.cos(origin_latitude)
+        * math.cos(destination_latitude)
+        * math.sin(longitude_delta / 2) ** 2
+    )
+    value = min(1.0, max(0.0, value))
+    return radius_miles * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
+
+
+def _coordinate_dict(coordinates: tuple[float, float]) -> dict[str, float]:
+    return {
+        "latitude": coordinates[0],
+        "longitude": coordinates[1],
+    }
+
+
 def _ratio(numerator: int, denominator: int) -> float:
     return round(numerator / denominator, 4) if denominator else 0.0
 
@@ -1069,21 +1213,35 @@ def _aggregate_metrics(values: Sequence[dict[str, Any]]) -> dict[str, Any]:
     if not values:
         return {}
     keys = (
-        "pickupCoverage",
+        "bakeryPickupCoverage",
         "completedDeliveries",
-        "uniquePantriesServed",
-        "fractionOpenPantriesNeverServed",
+        "pantryCoverageCount",
+        "pantryCoveragePercentage",
+        "pantriesNeverServedPercentage",
         "pantryServiceGini",
+        "pantryServiceGap",
         "averageDriveMinutes",
+        "averageDistanceMiles",
         "averageWaitingMinutes",
-        "averageRouteBurdenMinutes",
-        "totalRouteQuality",
-        "averageRouteQuality",
-        "acceptanceRate",
+        "averageTotalTripDurationMinutes",
+        "systemObjectiveValue",
+        "driverAcceptanceRate",
+        "expectedDriverAcceptanceRate",
+        "likelyRejectionRate",
         "unservedPickups",
         "totalSolverRuntimeSeconds",
+        "averageSolverRuntimeSeconds",
+        "totalRouteQuality",
     )
-    return {
+    aggregated = {
         key: round(sum(float(item[key]) for item in values) / len(values), 4)
         for key in keys
     }
+    for key in ("averageOptimalityGap", "maximumMipGap"):
+        materialized = [float(item[key]) for item in values if item[key] is not None]
+        aggregated[key] = (
+            round(sum(materialized) / len(materialized), 6)
+            if materialized
+            else None
+        )
+    return aggregated

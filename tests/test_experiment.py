@@ -154,8 +154,26 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(len(result.policies), len(DEFAULT_POLICIES))
         for report in result.policies:
             metrics = report.metrics()
-            self.assertIn("pickupCoverage", metrics)
-            self.assertIn("pantryServiceGini", metrics)
+            required_metrics = {
+                "bakeryPickupCoverage",
+                "completedDeliveries",
+                "pantryCoverageCount",
+                "pantryCoveragePercentage",
+                "pantriesNeverServedPercentage",
+                "pantryServiceGini",
+                "pantryServiceGap",
+                "averageDriveMinutes",
+                "averageDistanceMiles",
+                "averageWaitingMinutes",
+                "averageTotalTripDurationMinutes",
+                "unservedPickups",
+                "driverAcceptanceRate",
+                "expectedDriverAcceptanceRate",
+                "likelyRejectionRate",
+                "averageSolverRuntimeSeconds",
+                "averageOptimalityGap",
+            }
+            self.assertTrue(required_metrics.issubset(metrics))
             self.assertEqual(metrics["routesRejected"], 0)
             for day in report.days:
                 pickup_ids = [item.pickup_id for item in day.completed]
@@ -201,12 +219,14 @@ class ExperimentTests(unittest.TestCase):
         config = ExperimentConfig(
             SimulationConfig(
                 start_date=date(2026, 8, 24),
-                days=3,
+                days=5,
                 random_seed=2026,
-                drivers_per_day=3,
-                bakery_food_probability=1,
-                staffed_pantry_open_probability=1,
+                drivers_per_day=12,
+                bakery_food_probability=0.88,
+                staffed_pantry_open_probability=0.90,
             ),
+            matching_interval_minutes=60,
+            max_simultaneous_drivers=3,
             acceptance_enabled=False,
         )
 
@@ -224,9 +244,9 @@ class ExperimentTests(unittest.TestCase):
         ]
 
         self.assertGreater(mip_quality, max(baseline_qualities))
-        self.assertEqual(
+        self.assertGreaterEqual(
             metrics[RoutingPolicy.BAKEDBOSTON_MIP.value]["uniquePantriesServed"],
-            5,
+            8,
         )
         self.assertGreater(
             len({
@@ -259,6 +279,7 @@ class ExperimentTests(unittest.TestCase):
                     staffed_pantry_open_probability=1,
                 ),
                 matching_interval_minutes=120,
+                max_simultaneous_drivers=3,
                 acceptance_enabled=False,
             ),
         )
@@ -275,6 +296,7 @@ class ExperimentTests(unittest.TestCase):
         )
         epochs = [epoch for day in report.days for epoch in day.decision_epochs]
         self.assertTrue(any(len(epoch.requests) > 1 for epoch in epochs))
+        self.assertLessEqual(max(len(epoch.requests) for epoch in epochs), 3)
         selected = [
             candidate
             for epoch in epochs
@@ -291,6 +313,13 @@ class ExperimentTests(unittest.TestCase):
                         driver["selectedRoute"]["recommendationRank"],
                         1,
                     )
+                for route in driver["routes"]:
+                    self.assertIn("acceptanceProbability", route)
+                    self.assertIn("distanceMiles", route)
+                    self.assertIn("totalTripMinutes", route)
+                    self.assertIn("driverStart", route)
+                    self.assertIn("bakeryLocation", route)
+                    self.assertIn("pantryLocation", route)
 
     def test_summary_csv_contains_one_row_per_horizon_and_policy(self) -> None:
         result = compare_horizons(
