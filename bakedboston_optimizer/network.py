@@ -21,6 +21,8 @@ class OrganizationRecord:
     latitude: float | None
     longitude: float | None
     schedule: dict[str, Any]
+    schedule_source_url: str = ""
+    schedule_verified_at: str = ""
 
     @property
     def optimization_eligible(self) -> bool:
@@ -52,6 +54,26 @@ class OrganizationRecord:
 
 
 @dataclass(frozen=True)
+class DriverRecord:
+    id: int
+    active: bool
+    latitude: float | None
+    longitude: float | None
+    last_location_at: datetime | None
+
+    def location(self) -> Location | None:
+        if self.latitude is None or self.longitude is None:
+            return None
+        return Location(
+            address_entered=f"driver-{self.id}",
+            formatted_address="Current driver location",
+            latitude=self.latitude,
+            longitude=self.longitude,
+            validation_status=AddressValidationStatus.VALIDATED,
+        )
+
+
+@dataclass(frozen=True)
 class NetworkSnapshot:
     schema_version: int
     generated_at: datetime
@@ -64,6 +86,8 @@ class NetworkSnapshot:
     pickup_occurrences: tuple[dict[str, Any], ...]
     ride_requests: tuple[dict[str, Any], ...]
     route_offers: tuple[dict[str, Any], ...]
+    drivers: tuple[DriverRecord, ...] = ()
+    pantry_window_confirmations: tuple[dict[str, Any], ...] = ()
 
     @property
     def eligible_bakeries(self) -> tuple[OrganizationRecord, ...]:
@@ -121,10 +145,10 @@ class BakedBostonNetworkClient:
 
 
 def parse_snapshot(payload: dict[str, Any]) -> NetworkSnapshot:
-    if payload.get("schemaVersion") != 1:
+    if payload.get("schemaVersion") not in {1, 2}:
         raise ValueError(f"Unsupported optimizer feed schema: {payload.get('schemaVersion')}")
     return NetworkSnapshot(
-        schema_version=1,
+        schema_version=int(payload["schemaVersion"]),
         generated_at=datetime.fromisoformat(payload["generatedAt"].replace("Z", "+00:00")),
         bakeries=tuple(_bakery(item) for item in payload.get("bakeries", [])),
         pantries=tuple(_pantry(item) for item in payload.get("pantries", [])),
@@ -135,6 +159,8 @@ def parse_snapshot(payload: dict[str, Any]) -> NetworkSnapshot:
         pickup_occurrences=tuple(payload.get("pickupOccurrences", [])),
         ride_requests=tuple(payload.get("rideRequests", [])),
         route_offers=tuple(payload.get("routeOffers", [])),
+        drivers=tuple(_driver(item) for item in payload.get("drivers", [])),
+        pantry_window_confirmations=tuple(payload.get("pantryWindowConfirmations", [])),
     )
 
 
@@ -148,6 +174,8 @@ def _shared(item: dict[str, Any]) -> dict[str, Any]:
         "address_validation_status": str(item.get("addressValidationStatus") or "unvalidated"),
         "latitude": float(item["latitude"]) if item.get("latitude") is not None else None,
         "longitude": float(item["longitude"]) if item.get("longitude") is not None else None,
+        "schedule_source_url": str(item.get("scheduleSourceUrl") or ""),
+        "schedule_verified_at": str(item.get("scheduleVerifiedAt") or ""),
     }
 
 
@@ -170,3 +198,17 @@ def _pantry(item: dict[str, Any]) -> OrganizationRecord:
         "serviceModes": item.get("serviceModes", "[]"),
         "deliveriesSevenDays": item.get("deliveriesSevenDays", 0),
     })
+
+
+def _driver(item: dict[str, Any]) -> DriverRecord:
+    location_value = item.get("lastLocationAt")
+    return DriverRecord(
+        id=int(item["id"]),
+        active=bool(item.get("active", True)),
+        latitude=float(item["lastLatitude"]) if item.get("lastLatitude") is not None else None,
+        longitude=float(item["lastLongitude"]) if item.get("lastLongitude") is not None else None,
+        last_location_at=(
+            datetime.fromisoformat(str(location_value).replace("Z", "+00:00"))
+            if location_value else None
+        ),
+    )

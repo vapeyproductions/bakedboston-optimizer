@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-20T12:00:00Z",
+  "scenarioLabel": "Fictional format example — replace with cited public schedules",
+  "bakeries": [
+    {
+      "id": 1,
+      "name": "Example Bakery",
+      "address": "1 Example Street, Boston, MA",
+      "formattedAddress": "1 Example Street, Boston, MA",
+      "googlePlaceId": "example-bakery-place",
+      "addressValidationStatus": "validated",
+      "latitude": 42.355,
+      "longitude": -71.065,
+      "recurringDays": "Mon,Wed,Fri",
+      "readyTime": "{\"Mon\":\"17:00\",\"Wed\":\"17:00\",\"Fri\":\"17:00\"}",
+      "pickupDeadline": "{\"Mon\":\"18:00\",\"Wed\":\"18:00\",\"Fri\":\"18:00\"}",
+      "scheduleSourceUrl": "",
+      "scheduleVerifiedAt": ""
+    }
+  ],
+  "pantries": [
+    {
+      "id": 2,
+      "name": "Example Pantry",
+      "address": "2 Example Street, Boston, MA",
+      "formattedAddress": "2 Example Street, Boston, MA",
+      "googlePlaceId": "example-pantry-place",
+      "addressValidationStatus": "validated",
+      "latitude": 42.36,
+      "longitude": -71.06,
+      "recurringDays": "Mon,Wed,Fri",
+      "openTime": "[{\"recurrence\":\"weekly\",\"day\":\"Mon\",\"time\":\"16:30\"},{\"recurrence\":\"weekly\",\"day\":\"Wed\",\"time\":\"16:30\"},{\"recurrence\":\"weekly\",\"day\":\"Fri\",\"time\":\"16:30\"}]",
+      "closeTime": "[{\"time\":\"19:00\"},{\"time\":\"19:00\"},{\"time\":\"19:00\"}]",
+      "latestPermittedArrival": "[{\"time\":\"18:45\"},{\"time\":\"18:45\"},{\"time\":\"18:45\"}]",
+      "serviceModes": "[{\"mode\":\"unattended\"},{\"mode\":\"unattended\"},{\"mode\":\"unattended\"}]",
+      "scheduleSourceUrl": "",
+      "scheduleVerifiedAt": ""
+    }
+  ],
+  "availabilityWindows": [],
+  "availabilityPauses": [],
+  "scheduleExceptions": [],
+  "routes": [],
+  "pickupOccurrences": [],
+  "rideRequests": [],
+  "routeOffers": [],
+  "drivers": [],
+  "pantryWindowConfirmations": []
+}

@@ -5,7 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from bakedboston_optimizer.models import BakeryPickup, DriverRequest, Location, Pantry
-from bakedboston_optimizer.optimizer import rank_routes
+from bakedboston_optimizer.optimizer import OptimizationWeights, optimize_network, rank_routes
 from bakedboston_optimizer.google_maps import _duration_minutes
 
 
@@ -58,8 +58,8 @@ class OptimizerTests(unittest.TestCase):
         )
         self.assertEqual(len(routes), 1)
         self.assertEqual(routes[0].pickup_at, self.day.replace(hour=17))
-        self.assertEqual(routes[0].pantry_arrival_at, self.day.replace(hour=17, minute=35))
-        self.assertEqual(routes[0].finish_at, self.day.replace(hour=17, minute=50))
+        self.assertEqual(routes[0].pantry_arrival_at, self.day.replace(hour=17, minute=25))
+        self.assertEqual(routes[0].finish_at, self.day.replace(hour=17, minute=30))
 
     def test_claimed_pickup_is_excluded(self) -> None:
         claimed = BakeryPickup(**{**self.bakery.__dict__, "claimed": True})
@@ -94,6 +94,129 @@ class OptimizerTests(unittest.TestCase):
 
     def test_google_duration_is_converted_to_minutes(self) -> None:
         self.assertAlmostEqual(_duration_minutes("150s"), 2.5)
+
+    def test_network_model_assigns_each_driver_and_pickup_once(self) -> None:
+        second_pickup = BakeryPickup(
+            id="b2",
+            bakery_name="Second Bakery",
+            location=self.location("bakery-2"),
+            ready_at=self.day.replace(hour=17),
+            pickup_deadline=self.day.replace(hour=18),
+        )
+        second_request = DriverRequest(
+            id="r2",
+            driver_id="d2",
+            earliest_start=self.day.replace(hour=16, minute=45),
+            latest_finish=self.day.replace(hour=19),
+            start_location=self.location("start-2"),
+        )
+        first_request = DriverRequest(
+            **{**self.request.__dict__, "id": "r1", "driver_id": "d1"}
+        )
+        result = optimize_network(
+            [self.bakery, second_pickup],
+            [self.pantry],
+            [first_request, second_request],
+            FixedTravel({
+                ("start", "bakery"): 10,
+                ("start", "bakery-2"): 12,
+                ("start-2", "bakery"): 12,
+                ("start-2", "bakery-2"): 10,
+                ("bakery", "pantry"): 15,
+                ("bakery-2", "pantry"): 15,
+            }),
+        )
+
+        self.assertEqual(result.diagnostics.backend, "gurobi")
+        self.assertEqual(result.diagnostics.matched_count, 2)
+        self.assertEqual(len({item.driver_id for item in result.assignments}), 2)
+        self.assertEqual(len({item.route.bakery_id for item in result.assignments}), 2)
+        # Pantries intentionally have no capacity constraint while open.
+        self.assertEqual({item.route.pantry_id for item in result.assignments}, {"p1"})
+
+    def test_multiple_requests_from_one_driver_produce_one_assignment(self) -> None:
+        requests = [
+            DriverRequest(**{**self.request.__dict__, "id": "r1", "driver_id": "d1"}),
+            DriverRequest(**{**self.request.__dict__, "id": "r2", "driver_id": "d1"}),
+        ]
+        result = optimize_network(
+            [self.bakery],
+            [self.pantry],
+            requests,
+            FixedTravel({("start", "bakery"): 10, ("bakery", "pantry"): 15}),
+        )
+
+        self.assertEqual(result.diagnostics.matched_count, 1)
+        self.assertEqual(len({item.driver_id for item in result.assignments}), 1)
+
+    def test_delivery_count_is_optimized_before_route_quality(self) -> None:
+        second_pickup = BakeryPickup(
+            id="b2",
+            bakery_name="Second Bakery",
+            location=self.location("bakery-2"),
+            ready_at=self.day.replace(hour=17),
+            pickup_deadline=self.day.replace(hour=19),
+        )
+        requests = [
+            DriverRequest(
+                id="r1", driver_id="d1",
+                earliest_start=self.day.replace(hour=16),
+                latest_finish=self.day.replace(hour=22),
+                start_location=self.location("start"),
+            ),
+            DriverRequest(
+                id="r2", driver_id="d2",
+                earliest_start=self.day.replace(hour=16),
+                latest_finish=self.day.replace(hour=22),
+                start_location=self.location("start-2"),
+            ),
+        ]
+        late_pantry = Pantry(**{
+            **self.pantry.__dict__,
+            "receiving_end": self.day.replace(hour=22),
+            "latest_permitted_arrival": self.day.replace(hour=21, minute=30),
+        })
+        result = optimize_network(
+            [self.bakery, second_pickup],
+            [late_pantry],
+            requests,
+            FixedTravel({
+                ("start", "bakery"): 70,
+                ("start", "bakery-2"): 75,
+                ("start-2", "bakery"): 75,
+                ("start-2", "bakery-2"): 70,
+                ("bakery", "pantry"): 70,
+                ("bakery-2", "pantry"): 70,
+            }),
+            weights=OptimizationWeights(pantry_priority_reward=0),
+        )
+
+        self.assertEqual(result.diagnostics.matched_count, 2)
+        self.assertLess(result.diagnostics.route_quality, 0)
+
+    def test_route_quality_breaks_ties_between_equal_match_counts(self) -> None:
+        lower_priority = Pantry(
+            **{
+                **self.pantry.__dict__,
+                "id": "p2",
+                "pantry_name": "Lower Priority",
+                "location": self.location("pantry-2"),
+                "priority_score": 0.1,
+            }
+        )
+        request = DriverRequest(**{**self.request.__dict__, "id": "r1", "driver_id": "d1"})
+        result = optimize_network(
+            [self.bakery],
+            [self.pantry, lower_priority],
+            [request],
+            FixedTravel({
+                ("start", "bakery"): 10,
+                ("bakery", "pantry"): 15,
+                ("bakery", "pantry-2"): 15,
+            }),
+        )
+
+        self.assertEqual(result.assignments[0].route.pantry_id, "p1")
 
 
 if __name__ == "__main__":

@@ -54,6 +54,8 @@ class DriverRequest:
     latest_finish: datetime
     start_location: Location
     preferred_destination: Location | None = None
+    id: str = ""
+    driver_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -74,3 +76,29 @@ class RouteCandidate:
     pantry_priority: float
     score: float
     explanation: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AssignmentCandidate:
+    """A feasible driver-request, bakery-pickup, and pantry assignment."""
+
+    request_id: str
+    driver_id: str
+    route: RouteCandidate
+
+
+@dataclass(frozen=True)
+class SolverDiagnostics:
+    backend: str
+    status: str
+    candidate_count: int
+    matched_count: int
+    route_quality: float
+    runtime_seconds: float
+    mip_gap: float | None = None
+
+
+@dataclass(frozen=True)
+class NetworkOptimizationResult:
+    assignments: tuple[AssignmentCandidate, ...]
+    diagnostics: SolverDiagnostics

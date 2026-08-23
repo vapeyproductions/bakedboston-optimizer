@@ -54,6 +54,29 @@ class NetworkTests(unittest.TestCase):
             snapshot.bakeries[0].location()
         self.assertEqual(snapshot.eligible_bakeries, ())
 
+    def test_schema_two_includes_driver_locations_and_pantry_confirmations(self) -> None:
+        snapshot = parse_snapshot({
+            "schemaVersion": 2,
+            "generatedAt": "2026-07-27T12:00:00Z",
+            "bakeries": [],
+            "pantries": [],
+            "drivers": [{
+                "id": 9,
+                "active": True,
+                "lastLatitude": 42.36,
+                "lastLongitude": -71.06,
+                "lastLocationAt": "2026-07-27T11:59:00Z",
+            }],
+            "pantryWindowConfirmations": [{
+                "recipientId": 4,
+                "actionKey": "pantry-open:4:one-time:20",
+                "acknowledgedAt": "2026-07-27T12:01:00Z",
+            }],
+        })
+
+        self.assertIsNotNone(snapshot.drivers[0].location())
+        self.assertEqual(snapshot.pantry_window_confirmations[0]["recipientId"], 4)
+
 
 if __name__ == "__main__":
     unittest.main()
