@@ -21,20 +21,32 @@ from .web_export import build_web_payload
 def recommend(payload: dict[str, Any]) -> dict[str, Any]:
     """Return ranked live recommendations using the same model as the hackathon demo."""
 
-    earliest = _datetime(payload["earliestStart"])
-    latest = _datetime(payload["latestFinish"])
-    if latest <= earliest:
+    preferred_start = _datetime(payload["earliestStart"])
+    preferred_finish = _datetime(payload["latestFinish"])
+    if preferred_finish <= preferred_start:
         raise ValueError("latestFinish must be after earliestStart")
+    logged_at = _datetime(payload.get("loggedAt") or payload["earliestStart"])
+    search_until = _datetime(payload["searchUntil"]) if payload.get("searchUntil") else preferred_finish + timedelta(minutes=90)
+    if search_until <= logged_at:
+        raise ValueError("searchUntil must be after loggedAt")
     start = _location("driver-start", payload["startLocation"])
     preferred = _location("preferred-destination", payload["preferredDestination"]) if payload.get("preferredDestination") else None
     snapshot = _network()
-    pickups = _pickups(snapshot, earliest, latest)
-    pantries = _pantries(snapshot, earliest, latest)
+    pickups = _pickups(snapshot, logged_at, search_until)
+    pantries = _pantries(snapshot, logged_at, search_until)
     travel = GoogleMapsProvider(os.environ["GOOGLE_MAPS_API_KEY"]) if os.getenv("GOOGLE_MAPS_API_KEY") else HaversineTravelTimeProvider()
+    request = DriverRequest(
+        earliest_start=preferred_start,
+        latest_finish=preferred_finish,
+        start_location=start,
+        preferred_destination=preferred,
+        logged_at=logged_at,
+        search_until=search_until,
+    )
     routes = rank_routes(
         pickups,
         pantries,
-        DriverRequest(earliest_start=earliest, latest_finish=latest, start_location=start, preferred_destination=preferred),
+        request,
         travel,
     )
     return {
@@ -44,22 +56,8 @@ def recommend(payload: dict[str, Any]) -> dict[str, Any]:
             "status": "optimal" if active_solver_backend() == "gurobi" else "fallback",
             "candidateCount": len(routes),
         },
-        "routes": [{
-            "pickupId": int(route.bakery_id),
-            "bakeryName": route.bakery_name,
-            "pantryId": int(route.pantry_id.split(":", 1)[0]),
-            "pantryName": route.pantry_name,
-            "pantryServiceMode": _service_mode(snapshot, route.pantry_id),
-            "departAt": route.depart_at.isoformat(),
-            "pickupAt": route.pickup_at.isoformat(),
-            "pantryArrivalAt": route.pantry_arrival_at.isoformat(),
-            "finishAt": route.finish_at.isoformat(),
-            "driveMinutes": route.drive_minutes,
-            "waitingMinutes": route.waiting_minutes,
-            "pantryPriority": route.pantry_priority,
-            "score": route.score,
-            "explanation": list(route.explanation),
-        } for route in routes[:10]],
+        "request": _request_payload(request),
+        "routes": [_route_payload(snapshot, route) for route in routes[:10]],
     }
 
 
@@ -67,6 +65,13 @@ def recommend_network(payload: dict[str, Any]) -> dict[str, Any]:
     """Optimize active driver requests and confirmed pickups as one MIP."""
 
     snapshot = _network()
+    maps = (
+        GoogleMapsProvider(os.environ["GOOGLE_MAPS_API_KEY"])
+        if os.getenv("GOOGLE_MAPS_API_KEY")
+        else None
+    )
+    travel = maps or HaversineTravelTimeProvider()
+    zip_locations: dict[str, Location | None] = {}
     request_rows = [
         item for item in snapshot.ride_requests
         if item.get("status") == "active"
@@ -82,6 +87,111 @@ def recommend_network(payload: dict[str, Any]) -> dict[str, Any]:
         for item in snapshot.route_offers
         if item.get("status") in protected_offer_statuses
     }
+    request_rows = [
+        item for item in request_rows
+        if int(item["id"]) not in protected_request_ids
+    ]
+    driver_records = {record.id: record for record in snapshot.drivers if record.active}
+    requests: list[DriverRequest] = []
+    for item in request_rows:
+        driver = driver_records.get(int(item["driverId"]))
+        driver_location = driver.location() if driver else None
+        preferred_start_location = _zip_location(
+            maps,
+            item.get("startZip"),
+            zip_locations,
+        )
+        preferred_destination = _zip_location(
+            maps,
+            item.get("endZip"),
+            zip_locations,
+        )
+        # A requested starting ZIP describes where the driver expects to begin
+        # this particular trip. When it is omitted (or temporarily cannot be
+        # geocoded), fall back to the validated location on the driver profile.
+        start = preferred_start_location or driver_location
+        if start is None:
+            continue
+        preferred_start = _datetime(item["earliestStart"])
+        preferred_finish = _datetime(item["latestFinish"])
+        if preferred_finish <= preferred_start:
+            continue
+        logged_at = _datetime(item.get("loggedAt") or item.get("createdAt") or item["earliestStart"])
+        search_until = _datetime(item["searchUntil"]) if item.get("searchUntil") else preferred_finish + timedelta(minutes=90)
+        if search_until <= logged_at:
+            continue
+        requests.append(DriverRequest(
+            id=str(item["id"]),
+            driver_id=str(item["driverId"]),
+            earliest_start=preferred_start,
+            latest_finish=preferred_finish,
+            start_location=start,
+            preferred_destination=preferred_destination,
+            logged_at=logged_at,
+            search_until=search_until,
+        ))
+
+    if not requests:
+        return {
+            "generatedAt": datetime.now().astimezone().isoformat(),
+            "solver": {
+                "backend": active_solver_backend(),
+                "status": "no_eligible_driver_requests",
+                "candidateCount": 0,
+                "matchedCount": 0,
+            },
+            "assignments": [],
+        }
+    horizon_start = min(request.login_time for request in requests)
+    horizon_end = max(request.hard_search_end for request in requests)
+    result = optimize_network(
+        _pickups(snapshot, horizon_start, horizon_end),
+        _pantries(snapshot, horizon_start, horizon_end),
+        requests,
+        travel,
+    )
+    request_by_id = {request.id: request for request in requests}
+    return {
+        "generatedAt": datetime.now().astimezone().isoformat(),
+        "solver": {
+            "backend": result.diagnostics.backend,
+            "status": result.diagnostics.status,
+            "candidateCount": result.diagnostics.candidate_count,
+            "matchedCount": result.diagnostics.matched_count,
+            "routeQuality": result.diagnostics.route_quality,
+            "runtimeSeconds": result.diagnostics.runtime_seconds,
+            "mipGap": result.diagnostics.mip_gap,
+        },
+        "assignments": [{
+            "requestId": int(assignment.request_id),
+            "driverId": int(assignment.driver_id),
+            "request": _request_payload(request_by_id[assignment.request_id]),
+            **_route_payload(snapshot, assignment.route),
+        } for assignment in result.assignments],
+    }
+
+
+def _zip_location(
+    maps: GoogleMapsProvider | None,
+    raw_zip: object,
+    cache: dict[str, Location | None],
+) -> Location | None:
+    """Resolve a soft ZIP preference without making matching depend on geocoding.
+
+    Saved ride requests may omit either ZIP. A temporary Google failure should
+    degrade to the driver's profile origin or no destination preference rather
+    than suppressing every otherwise feasible route.
+    """
+
+    zip_code = str(raw_zip or "").strip()
+    if maps is None or not zip_code:
+        return None
+    if zip_code not in cache:
+        try:
+            cache[zip_code] = maps.validate_address(f"{zip_code}, USA")
+        except (KeyError, RuntimeError, TimeoutError, ValueError, OSError):
+            cache[zip_code] = None
+    return cache[zip_code]
 
 
 def simulate_network(payload: dict[str, Any]) -> dict[str, Any]:
@@ -126,79 +236,6 @@ def simulate_network(payload: dict[str, Any]) -> dict[str, Any]:
         HaversineTravelTimeProvider(),
     )
     return report.as_dict()
-    request_rows = [
-        item for item in request_rows
-        if int(item["id"]) not in protected_request_ids
-    ]
-    driver_records = {record.id: record for record in snapshot.drivers if record.active}
-    requests: list[DriverRequest] = []
-    for item in request_rows:
-        driver = driver_records.get(int(item["driverId"]))
-        start = driver.location() if driver else None
-        if start is None:
-            continue
-        earliest = _datetime(item["earliestStart"])
-        latest = _datetime(item["latestFinish"])
-        if latest <= earliest:
-            continue
-        requests.append(DriverRequest(
-            id=str(item["id"]),
-            driver_id=str(item["driverId"]),
-            earliest_start=earliest,
-            latest_finish=latest,
-            start_location=start,
-        ))
-
-    if not requests:
-        return {
-            "generatedAt": datetime.now().astimezone().isoformat(),
-            "solver": {
-                "backend": "gurobi",
-                "status": "no_eligible_driver_requests",
-                "candidateCount": 0,
-                "matchedCount": 0,
-            },
-            "assignments": [],
-        }
-    earliest = min(request.earliest_start for request in requests)
-    latest = max(request.latest_finish for request in requests)
-    travel = GoogleMapsProvider(os.environ["GOOGLE_MAPS_API_KEY"]) if os.getenv("GOOGLE_MAPS_API_KEY") else HaversineTravelTimeProvider()
-    result = optimize_network(
-        _pickups(snapshot, earliest, latest),
-        _pantries(snapshot, earliest, latest),
-        requests,
-        travel,
-    )
-    return {
-        "generatedAt": datetime.now().astimezone().isoformat(),
-        "solver": {
-            "backend": result.diagnostics.backend,
-            "status": result.diagnostics.status,
-            "candidateCount": result.diagnostics.candidate_count,
-            "matchedCount": result.diagnostics.matched_count,
-            "routeQuality": result.diagnostics.route_quality,
-            "runtimeSeconds": result.diagnostics.runtime_seconds,
-            "mipGap": result.diagnostics.mip_gap,
-        },
-        "assignments": [{
-            "requestId": int(assignment.request_id),
-            "driverId": int(assignment.driver_id),
-            "pickupId": int(assignment.route.bakery_id),
-            "bakeryName": assignment.route.bakery_name,
-            "pantryId": int(assignment.route.pantry_id.split(":", 1)[0]),
-            "pantryName": assignment.route.pantry_name,
-            "pantryServiceMode": _service_mode(snapshot, assignment.route.pantry_id),
-            "departAt": assignment.route.depart_at.isoformat(),
-            "pickupAt": assignment.route.pickup_at.isoformat(),
-            "pantryArrivalAt": assignment.route.pantry_arrival_at.isoformat(),
-            "finishAt": assignment.route.finish_at.isoformat(),
-            "driveMinutes": assignment.route.drive_minutes,
-            "waitingMinutes": assignment.route.waiting_minutes,
-            "pantryPriority": assignment.route.pantry_priority,
-            "score": assignment.route.score,
-            "explanation": list(assignment.route.explanation),
-        } for assignment in result.assignments],
-    }
 
 
 def simulate_custom_experiment(payload: dict[str, Any]) -> dict[str, Any]:
@@ -278,6 +315,43 @@ def _service_mode(snapshot: NetworkSnapshot, pantry_window_id: str) -> str:
         if str(window.get("id")) == window_id:
             return str(window.get("serviceMode") or "staffed")
     return "staffed"
+
+
+def _request_payload(request: DriverRequest) -> dict[str, Any]:
+    return {
+        "loggedAt": request.login_time.isoformat(),
+        "preferredStart": request.preferred_start.isoformat(),
+        "preferredFinish": request.preferred_finish.isoformat(),
+        "searchUntil": request.hard_search_end.isoformat(),
+    }
+
+
+def _route_payload(snapshot: NetworkSnapshot, route: Any) -> dict[str, Any]:
+    """Serialize both the operational itinerary and its soft-window diagnostics."""
+
+    return {
+        "pickupId": int(route.bakery_id),
+        "bakeryName": route.bakery_name,
+        "pantryId": int(route.pantry_id.split(":", 1)[0]),
+        "pantryName": route.pantry_name,
+        "pantryServiceMode": _service_mode(snapshot, route.pantry_id),
+        "departAt": route.depart_at.isoformat(),
+        "pickupAt": route.pickup_at.isoformat(),
+        "pantryArrivalAt": route.pantry_arrival_at.isoformat(),
+        "finishAt": route.finish_at.isoformat(),
+        "driveMinutes": route.drive_minutes,
+        # Kept for older mobile clients; this is waiting at the origin before
+        # the just-in-time departure, not time spent idling at a facility.
+        "waitingMinutes": route.waiting_minutes,
+        "waitUntilDepartureMinutes": route.waiting_minutes,
+        "predepartureWaitMinutes": route.waiting_minutes,
+        "facilityWaitMinutes": route.facility_waiting_minutes,
+        "requestedTimeDeviationMinutes": route.requested_time_deviation_minutes,
+        "withinPreferredWindow": route.within_preferred_window,
+        "pantryPriority": route.pantry_priority,
+        "score": route.score,
+        "explanation": list(route.explanation),
+    }
 
 
 def _network() -> NetworkSnapshot:

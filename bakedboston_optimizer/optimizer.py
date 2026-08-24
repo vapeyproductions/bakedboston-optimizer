@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from itertools import product
 import atexit
 import os
@@ -39,8 +39,12 @@ _WLS_ENVIRONMENT_SIGNATURE: tuple[str, str, str] | None = None
 class OptimizationWeights:
     pantry_priority_reward: float = 45.0
     drive_minute_penalty: float = 1.0
-    waiting_minute_penalty: float = 0.35
+    # Waiting before leaving is substantially less burdensome than waiting at
+    # a facility, but very distant future routes should still rank lower.
+    waiting_minute_penalty: float = 0.06
+    facility_waiting_minute_penalty: float = 0.80
     destination_minute_penalty: float = 0.65
+    requested_time_deviation_minute_penalty: float = 0.85
 
 
 class GurobiUnavailableError(RuntimeError):
@@ -699,24 +703,131 @@ def _candidate(
     if pickup.claimed:
         return None
 
-    to_bakery = travel.duration_minutes(request.start_location, pickup.location, request.earliest_start)
-    arrival_at_bakery = request.earliest_start + timedelta(minutes=to_bakery)
+    # A driver entering the system creates a decision epoch; it does not force
+    # an immediate departure.  Evaluate the scheduling breakpoints at which a
+    # route can become just-in-time for the bakery, pantry, or requested trip
+    # interval, then keep the highest-scoring feasible timing.
+    login_at = request.login_time
+    initial_to_bakery = travel.duration_minutes(request.start_location, pickup.location, login_at)
+    initial_leave_bakery = pickup.ready_at + timedelta(minutes=pickup_service_minutes)
+    initial_to_pantry = travel.duration_minutes(pickup.location, pantry.location, initial_leave_bakery)
+    rough_route_minutes = initial_to_bakery + pickup_service_minutes + initial_to_pantry + dropoff_service_minutes
+    proposed_departures = {
+        login_at,
+        request.preferred_start,
+        pickup.ready_at - timedelta(minutes=initial_to_bakery),
+        pickup.pickup_deadline - timedelta(minutes=initial_to_bakery),
+        pantry.receiving_start - timedelta(minutes=rough_route_minutes - dropoff_service_minutes),
+        request.preferred_finish - timedelta(minutes=rough_route_minutes),
+    }
+
+    timings: list[dict[str, object]] = []
+    for proposed in proposed_departures:
+        depart_at = max(login_at, proposed)
+        # Traffic can change with departure time. Re-evaluate twice after
+        # shifting any facility wait back into pre-departure time.
+        for _ in range(3):
+            timing = _evaluate_timing(
+                pickup,
+                pantry,
+                request,
+                travel,
+                depart_at,
+                pickup_service_minutes,
+                dropoff_service_minutes,
+            )
+            if timing is None:
+                break
+            facility_wait = float(timing["facility_waiting_minutes"])
+            if facility_wait <= 0.01:
+                break
+            shifted = depart_at + timedelta(minutes=facility_wait)
+            if shifted <= depart_at:
+                break
+            depart_at = shifted
+        timing = _evaluate_timing(
+            pickup,
+            pantry,
+            request,
+            travel,
+            depart_at,
+            pickup_service_minutes,
+            dropoff_service_minutes,
+        )
+        if timing is not None:
+            timings.append(timing)
+
+    if not timings:
+        return None
+
+    def timing_score(item: dict[str, object]) -> float:
+        return (
+            - weights.drive_minute_penalty * float(item["drive_minutes"])
+            - weights.waiting_minute_penalty * float(item["predeparture_waiting_minutes"])
+            - weights.facility_waiting_minute_penalty * float(item["facility_waiting_minutes"])
+            - weights.destination_minute_penalty * float(item["destination_minutes"])
+            - weights.requested_time_deviation_minute_penalty * float(item["requested_time_deviation_minutes"])
+        )
+
+    best = max(timings, key=lambda item: (timing_score(item), -float(item["predeparture_waiting_minutes"])))
+    score = weights.pantry_priority_reward * pantry.priority_score + timing_score(best)
+    return RouteCandidate(
+        bakery_id=pickup.id,
+        bakery_name=pickup.bakery_name,
+        bakery_address=pickup.location.formatted_address,
+        pantry_id=pantry.id,
+        pantry_name=pantry.pantry_name,
+        pantry_address=pantry.location.formatted_address,
+        depart_at=best["depart_at"],
+        pickup_at=best["pickup_at"],
+        pantry_arrival_at=best["pantry_arrival_at"],
+        finish_at=best["finish_at"],
+        drive_minutes=float(best["drive_minutes"]),
+        waiting_minutes=float(best["predeparture_waiting_minutes"]),
+        destination_minutes=float(best["destination_minutes"]),
+        pantry_priority=pantry.priority_score,
+        score=score,
+        explanation=_explanation(
+            pantry.priority_score,
+            float(best["drive_minutes"]),
+            float(best["destination_minutes"]),
+            float(best["requested_time_deviation_minutes"]),
+        ),
+        facility_waiting_minutes=float(best["facility_waiting_minutes"]),
+        requested_time_deviation_minutes=float(best["requested_time_deviation_minutes"]),
+        within_preferred_window=bool(best["within_preferred_window"]),
+    )
+
+
+def _evaluate_timing(
+    pickup: BakeryPickup,
+    pantry: Pantry,
+    request: DriverRequest,
+    travel: TravelTimeProvider,
+    depart_at: datetime,
+    pickup_service_minutes: int,
+    dropoff_service_minutes: int,
+) -> dict[str, object] | None:
+    if depart_at < request.login_time or depart_at > request.hard_search_end:
+        return None
+
+    to_bakery = travel.duration_minutes(request.start_location, pickup.location, depart_at)
+    arrival_at_bakery = depart_at + timedelta(minutes=to_bakery)
     pickup_at = max(arrival_at_bakery, pickup.ready_at)
     if pickup_at > pickup.pickup_deadline:
         return None
-
     waiting_at_bakery = max(0.0, (pickup.ready_at - arrival_at_bakery).total_seconds() / 60)
+
     leave_bakery = pickup_at + timedelta(minutes=pickup_service_minutes)
     to_pantry = travel.duration_minutes(pickup.location, pantry.location, leave_bakery)
     raw_pantry_arrival = leave_bakery + timedelta(minutes=to_pantry)
     pantry_arrival = max(raw_pantry_arrival, pantry.receiving_start)
     waiting_at_pantry = max(0.0, (pantry.receiving_start - raw_pantry_arrival).total_seconds() / 60)
-
     if pantry_arrival > pantry.latest_permitted_arrival or pantry_arrival > pantry.receiving_end:
         return None
 
     finish_at = pantry_arrival + timedelta(minutes=dropoff_service_minutes)
-    if finish_at > request.latest_finish:
+    if finish_at > request.hard_search_end:
         return None
 
     destination_minutes = 0.0
@@ -727,36 +838,32 @@ def _candidate(
             finish_at,
         )
 
-    drive_minutes = to_bakery + to_pantry
-    waiting_minutes = waiting_at_bakery + waiting_at_pantry
-    score = (
-        weights.pantry_priority_reward * pantry.priority_score
-        - weights.drive_minute_penalty * drive_minutes
-        - weights.waiting_minute_penalty * waiting_minutes
-        - weights.destination_minute_penalty * destination_minutes
-    )
-    return RouteCandidate(
-        bakery_id=pickup.id,
-        bakery_name=pickup.bakery_name,
-        bakery_address=pickup.location.formatted_address,
-        pantry_id=pantry.id,
-        pantry_name=pantry.pantry_name,
-        pantry_address=pantry.location.formatted_address,
-        depart_at=request.earliest_start,
-        pickup_at=pickup_at,
-        pantry_arrival_at=pantry_arrival,
-        finish_at=finish_at,
-        drive_minutes=drive_minutes,
-        waiting_minutes=waiting_minutes,
-        destination_minutes=destination_minutes,
-        pantry_priority=pantry.priority_score,
-        score=score,
-        explanation=_explanation(pantry.priority_score, drive_minutes, destination_minutes),
-    )
+    early_start = max(0.0, (request.preferred_start - depart_at).total_seconds() / 60)
+    late_finish = max(0.0, (finish_at - request.preferred_finish).total_seconds() / 60)
+    requested_time_deviation = early_start + late_finish
+    return {
+        "depart_at": depart_at,
+        "pickup_at": pickup_at,
+        "pantry_arrival_at": pantry_arrival,
+        "finish_at": finish_at,
+        "drive_minutes": to_bakery + to_pantry,
+        "predeparture_waiting_minutes": (depart_at - request.login_time).total_seconds() / 60,
+        "facility_waiting_minutes": waiting_at_bakery + waiting_at_pantry,
+        "destination_minutes": destination_minutes,
+        "requested_time_deviation_minutes": requested_time_deviation,
+        "within_preferred_window": requested_time_deviation <= 0.01,
+    }
 
 
-def _explanation(priority: float, drive_minutes: float, destination_minutes: float) -> tuple[str, ...]:
+def _explanation(
+    priority: float,
+    drive_minutes: float,
+    destination_minutes: float,
+    requested_time_deviation_minutes: float,
+) -> tuple[str, ...]:
     reasons: list[str] = []
+    if requested_time_deviation_minutes <= 0.01:
+        reasons.append("Fits the driver's requested time window")
     if priority >= 0.7:
         reasons.append("Serves a higher-priority pantry")
     if drive_minutes <= 30:

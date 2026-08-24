@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 
 
@@ -50,12 +50,41 @@ class Pantry:
 
 @dataclass(frozen=True)
 class DriverRequest:
+    """A driver's arrival to the marketplace and their soft trip preferences.
+
+    ``earliest_start`` and ``latest_finish`` remain the preferred trip interval
+    for API compatibility.  Logging in is an information event, not a forced
+    departure: ``logged_at`` is when routes may first be considered, while the
+    optimizer is free to choose a later just-in-time departure.  ``search_until``
+    is the outer operational horizon; missing the preferred interval is
+    penalized rather than automatically making an otherwise useful route
+    infeasible.
+    """
+
     earliest_start: datetime
     latest_finish: datetime
     start_location: Location
     preferred_destination: Location | None = None
     id: str = ""
     driver_id: str = ""
+    logged_at: datetime | None = None
+    search_until: datetime | None = None
+
+    @property
+    def login_time(self) -> datetime:
+        return self.logged_at or self.earliest_start
+
+    @property
+    def preferred_start(self) -> datetime:
+        return self.earliest_start
+
+    @property
+    def preferred_finish(self) -> datetime:
+        return self.latest_finish
+
+    @property
+    def hard_search_end(self) -> datetime:
+        return self.search_until or self.latest_finish + timedelta(minutes=90)
 
 
 @dataclass(frozen=True)
@@ -76,6 +105,9 @@ class RouteCandidate:
     pantry_priority: float
     score: float
     explanation: tuple[str, ...]
+    facility_waiting_minutes: float = 0.0
+    requested_time_deviation_minutes: float = 0.0
+    within_preferred_window: bool = True
 
 
 @dataclass(frozen=True)

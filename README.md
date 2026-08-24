@@ -29,11 +29,13 @@ account, sends a notification, or represents a real pickup.
 
 ## Gurobi mixed-integer model
 
-For each feasible driver request \(d\), bakery occurrence \(b\), and pantry
-window \(p\):
+Before the MIP runs, the route generator creates timed route columns. Each
+column records a driver request, bakery occurrence, pantry window, optimized
+departure, pickup, pantry arrival, and finish time. Login is the decision time,
+not the departure time. For each feasible timed column \(a\):
 
 \[
-x_{d,b,p} \in \{0,1\}
+x_a \in \{0,1\}
 \]
 
 Gurobi uses two lexicographic objectives:
@@ -45,9 +47,20 @@ Candidate quality is:
 
 \[
 q_{d,b,p} = 45\,priority_p - driveMinutes_{d,b,p}
-- 0.35\,waitingMinutes_{d,b,p}
+- 0.06\,originWaitMinutes_{d,b,p}
+- 0.80\,facilityWaitMinutes_{d,b,p}
+- 0.85\,timeDeviationMinutes_{d,b,p}
 - 0.65\,destinationMinutes_{d,b,p}
 \]
+
+Opening the app creates a decision epoch; it does not force immediate
+departure. The route generator chooses a just-in-time departure, includes 5
+minutes to load at the bakery and 5 minutes to unload at the pantry, and shows
+the volunteer how long to wait before leaving. `timeDeviationMinutes` measures
+departure before the requested start plus completion after the requested
+finish, so the requested interval is an influential soft preference rather
+than a hard filter. A requested starting ZIP becomes that request's origin; an
+ending ZIP is represented by the post-drop-off `destinationMinutes` penalty.
 
 Constraints ensure that each request and physical driver receives at most one
 assignment, each bakery occurrence is used at most once, and every selected

@@ -289,7 +289,7 @@ class ExperimentTests(unittest.TestCase):
             count
             for day in scenario.days
             for count in Counter(
-                request.earliest_start for request in day.requests
+                request.login_time for request in day.requests
             ).values()
         ]
         self.assertTrue(all(1 <= count <= 7 for count in daily_driver_counts))
@@ -298,7 +298,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertTrue(any(count == 1 for count in epoch_driver_counts))
         self.assertTrue(any(count > 1 for count in epoch_driver_counts))
         self.assertTrue(any(
-            request.earliest_start.minute % 15 != 0
+            request.login_time.minute % 15 != 0
             for day in scenario.days
             for request in day.requests
         ))

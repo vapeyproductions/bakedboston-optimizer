@@ -69,7 +69,9 @@ class ExperimentConfig:
     acceptance_enabled: bool = True
     acceptance_intercept: float = 2.2
     acceptance_drive_penalty: float = 0.045
-    acceptance_wait_penalty: float = 0.030
+    acceptance_predeparture_wait_penalty: float = 0.006
+    acceptance_facility_wait_penalty: float = 0.040
+    acceptance_requested_time_deviation_penalty: float = 0.050
     acceptance_destination_penalty: float = 0.035
     max_simultaneous_drivers: int = 3
 
@@ -80,7 +82,18 @@ class ExperimentConfig:
             raise ValueError("max_simultaneous_drivers must be 2 or 3")
         for name, value in (
             ("acceptance_drive_penalty", self.acceptance_drive_penalty),
-            ("acceptance_wait_penalty", self.acceptance_wait_penalty),
+            (
+                "acceptance_predeparture_wait_penalty",
+                self.acceptance_predeparture_wait_penalty,
+            ),
+            (
+                "acceptance_facility_wait_penalty",
+                self.acceptance_facility_wait_penalty,
+            ),
+            (
+                "acceptance_requested_time_deviation_penalty",
+                self.acceptance_requested_time_deviation_penalty,
+            ),
             ("acceptance_destination_penalty", self.acceptance_destination_penalty),
         ):
             if value < 0:
@@ -142,9 +155,14 @@ class ExperimentAssignment:
     pantry_window_id: str
     pantry_name: str
     depart_at: datetime
+    pickup_at: datetime
+    pantry_arrival_at: datetime
     finish_at: datetime
     drive_minutes: float
     waiting_minutes: float
+    facility_waiting_minutes: float
+    requested_time_deviation_minutes: float
+    within_preferred_window: bool
     destination_minutes: float
     pantry_priority: float
     route_score: float
@@ -164,9 +182,17 @@ class ExperimentAssignment:
             "pantryWindowId": self.pantry_window_id,
             "pantryName": self.pantry_name,
             "departAt": self.depart_at.isoformat(),
+            "pickupAt": self.pickup_at.isoformat(),
+            "pantryArrivalAt": self.pantry_arrival_at.isoformat(),
             "finishAt": self.finish_at.isoformat(),
             "driveMinutes": round(self.drive_minutes, 3),
             "waitingMinutes": round(self.waiting_minutes, 3),
+            "predepartureWaitMinutes": round(self.waiting_minutes, 3),
+            "facilityWaitingMinutes": round(self.facility_waiting_minutes, 3),
+            "requestedTimeDeviationMinutes": round(
+                self.requested_time_deviation_minutes, 3
+            ),
+            "withinPreferredWindow": self.within_preferred_window,
             "destinationMinutes": round(self.destination_minutes, 3),
             "pantryPriority": round(self.pantry_priority, 4),
             "routeScore": round(self.route_score, 4),
@@ -188,9 +214,14 @@ class ExperimentCandidate:
     pantry_window_id: str
     pantry_name: str
     depart_at: datetime
+    pickup_at: datetime
+    pantry_arrival_at: datetime
     finish_at: datetime
     drive_minutes: float
     waiting_minutes: float
+    facility_waiting_minutes: float
+    requested_time_deviation_minutes: float
+    within_preferred_window: bool
     destination_minutes: float
     pantry_priority: float
     route_score: float
@@ -213,9 +244,17 @@ class ExperimentCandidate:
             "pantryWindowId": self.pantry_window_id,
             "pantryName": self.pantry_name,
             "departAt": self.depart_at.isoformat(),
+            "pickupAt": self.pickup_at.isoformat(),
+            "pantryArrivalAt": self.pantry_arrival_at.isoformat(),
             "finishAt": self.finish_at.isoformat(),
             "driveMinutes": round(self.drive_minutes, 3),
             "waitingMinutes": round(self.waiting_minutes, 3),
+            "predepartureWaitMinutes": round(self.waiting_minutes, 3),
+            "facilityWaitingMinutes": round(self.facility_waiting_minutes, 3),
+            "requestedTimeDeviationMinutes": round(
+                self.requested_time_deviation_minutes, 3
+            ),
+            "withinPreferredWindow": self.within_preferred_window,
             "destinationMinutes": round(self.destination_minutes, 3),
             "pantryPriority": round(self.pantry_priority, 4),
             "routeScore": round(self.route_score, 4),
@@ -266,6 +305,10 @@ class DecisionEpochResult:
                 {
                     "requestId": request.id,
                     "driverId": request.driver_id,
+                    "loggedAt": request.login_time.isoformat(),
+                    "preferredStart": request.preferred_start.isoformat(),
+                    "preferredFinish": request.preferred_finish.isoformat(),
+                    "searchUntil": request.hard_search_end.isoformat(),
                     "earliestStart": request.earliest_start.isoformat(),
                     "latestFinish": request.latest_finish.isoformat(),
                     "hasPreferredDestination": request.preferred_destination is not None,
@@ -407,12 +450,29 @@ class PolicyReport:
             "averageDriveMinutes": _mean(item.drive_minutes for item in completed),
             "averageDistanceMiles": _mean(item.distance_miles for item in completed),
             "averageWaitingMinutes": _mean(item.waiting_minutes for item in completed),
+            "averagePredepartureWaitMinutes": _mean(
+                item.waiting_minutes for item in completed
+            ),
+            "averageFacilityWaitingMinutes": _mean(
+                item.facility_waiting_minutes for item in completed
+            ),
+            "averageRequestedTimeDeviationMinutes": _mean(
+                item.requested_time_deviation_minutes for item in completed
+            ),
+            "preferredWindowFitRate": _ratio(
+                sum(item.within_preferred_window for item in completed),
+                len(completed),
+            ),
             "averageDestinationMinutes": _mean(item.destination_minutes for item in completed),
             "averageTotalTripDurationMinutes": _mean(
                 item.total_trip_minutes for item in completed
             ),
             "averageRouteBurdenMinutes": _mean(
                 item.total_trip_minutes for item in completed
+            ),
+            "averageElapsedFromLoginMinutes": _mean(
+                item.waiting_minutes + item.total_trip_minutes
+                for item in completed
             ),
             "averagePantryPriorityServed": _mean(
                 (item.pantry_priority for item in completed),
@@ -792,7 +852,11 @@ def acceptance_probability(
     logit = (
         config.acceptance_intercept
         - config.acceptance_drive_penalty * route.drive_minutes
-        - config.acceptance_wait_penalty * route.waiting_minutes
+        - config.acceptance_predeparture_wait_penalty * route.waiting_minutes
+        - config.acceptance_facility_wait_penalty
+        * route.facility_waiting_minutes
+        - config.acceptance_requested_time_deviation_penalty
+        * route.requested_time_deviation_minutes
         - config.acceptance_destination_penalty * route.destination_minutes
     )
     return min(0.98, max(0.02, 1.0 / (1.0 + math.exp(-logit))))
@@ -825,7 +889,12 @@ SUMMARY_CSV_FIELDS: tuple[str, ...] = (
     "averageDriveMinutes",
     "averageDistanceMiles",
     "averageWaitingMinutes",
+    "averagePredepartureWaitMinutes",
+    "averageFacilityWaitingMinutes",
+    "averageRequestedTimeDeviationMinutes",
+    "preferredWindowFitRate",
     "averageTotalTripDurationMinutes",
+    "averageElapsedFromLoginMinutes",
     "systemObjectiveValue",
     "driverAcceptanceRate",
     "expectedDriverAcceptanceRate",
@@ -901,15 +970,35 @@ def _rolling_driver_requests(
 
     for group_size in group_sizes:
         pickup_anchor = rng.choice(pickups)
-        raw_start = pickup_anchor.ready_at - timedelta(minutes=rng.randint(0, 90))
-        earliest = raw_start.replace(second=0, microsecond=0)
-        while earliest in used_epochs:
-            earliest += timedelta(minutes=rng.randint(1, max(interval_minutes // 3, 1)))
-        used_epochs.add(earliest)
+        # Logging in is a marketplace event, not an implied departure.  Most
+        # volunteers arrive at irregular minute-level times before a plausible
+        # pickup.  Members of a rare simultaneous group share this login time.
+        raw_login = pickup_anchor.ready_at - timedelta(minutes=rng.randint(20, 150))
+        logged_at = raw_login.replace(second=0, microsecond=0)
+        while logged_at in used_epochs:
+            logged_at += timedelta(
+                minutes=rng.randint(1, max(interval_minutes // 3, 1))
+            )
+        used_epochs.add(logged_at)
 
         for _ in range(group_size):
             request_index += 1
-            latest = earliest + timedelta(minutes=rng.choice((90, 120, 150, 180)))
+            # Some drivers browse for a trip they could do now, while others
+            # request a future interval (for example, after work).  The
+            # preferred interval is soft; the wider search horizon preserves
+            # useful alternatives that miss the preference slightly.
+            if rng.random() < 0.42:
+                preferred_start = logged_at
+            else:
+                preferred_start = logged_at + timedelta(
+                    minutes=rng.choice((30, 45, 60, 75, 90, 120))
+                )
+            preferred_finish = preferred_start + timedelta(
+                minutes=rng.choice((60, 90, 120))
+            )
+            search_until = preferred_finish + timedelta(
+                minutes=rng.choice((45, 60, 90))
+            )
             start = Location(
                 address_entered=f"synthetic-driver-{request_index}-origin",
                 formatted_address="Synthetic Boston-area origin",
@@ -928,14 +1017,16 @@ def _rolling_driver_requests(
                     validation_status=AddressValidationStatus.VALIDATED,
                 )
             requests.append(DriverRequest(
-                id=f"request-{earliest.date().isoformat()}-{request_index}",
+                id=f"request-{logged_at.date().isoformat()}-{request_index}",
                 driver_id=f"synthetic-driver-{request_index}",
-                earliest_start=earliest,
-                latest_finish=latest,
+                earliest_start=preferred_start,
+                latest_finish=preferred_finish,
                 start_location=start,
                 preferred_destination=preferred,
+                logged_at=logged_at,
+                search_until=search_until,
             ))
-    return sorted(requests, key=lambda item: (item.earliest_start, item.id))
+    return sorted(requests, key=lambda item: (item.login_time, item.id))
 
 
 def _floor_epoch(value: datetime, interval_minutes: int) -> datetime:
@@ -948,7 +1039,7 @@ def _request_epochs(
 ) -> list[tuple[datetime, tuple[DriverRequest, ...]]]:
     grouped: dict[datetime, list[DriverRequest]] = defaultdict(list)
     for request in requests:
-        grouped[request.earliest_start].append(request)
+        grouped[request.login_time].append(request)
     return [
         (epoch, tuple(sorted(items, key=lambda item: item.id)))
         for epoch, items in sorted(grouped.items())
@@ -1005,7 +1096,7 @@ def _policy_sort_key(
         )
     if policy == RoutingPolicy.SHORTEST_ROUTE:
         return lambda item: (
-            item.route.drive_minutes + item.route.waiting_minutes,
+            item.route.drive_minutes + item.route.facility_waiting_minutes,
             item.route.finish_at,
             -item.route.score,
         )
@@ -1023,8 +1114,9 @@ def _policy_sort_key(
         )
     if policy == RoutingPolicy.DRIVER_FIT:
         return lambda item: (
+            item.route.requested_time_deviation_minutes,
             item.route.destination_minutes,
-            item.route.drive_minutes + item.route.waiting_minutes,
+            item.route.drive_minutes + item.route.facility_waiting_minutes,
             item.route.finish_at,
         )
     raise ValueError(f"Unsupported routing policy: {policy}")
@@ -1073,9 +1165,16 @@ def _experiment_assignment(
         pantry_window_id=route.pantry_id,
         pantry_name=route.pantry_name,
         depart_at=route.depart_at,
+        pickup_at=route.pickup_at,
+        pantry_arrival_at=route.pantry_arrival_at,
         finish_at=route.finish_at,
         drive_minutes=route.drive_minutes,
         waiting_minutes=route.waiting_minutes,
+        facility_waiting_minutes=route.facility_waiting_minutes,
+        requested_time_deviation_minutes=(
+            route.requested_time_deviation_minutes
+        ),
+        within_preferred_window=route.within_preferred_window,
         destination_minutes=route.destination_minutes,
         pantry_priority=route.pantry_priority,
         route_score=route.score,
@@ -1116,9 +1215,16 @@ def _experiment_candidate(
         pantry_window_id=route.pantry_id,
         pantry_name=route.pantry_name,
         depart_at=route.depart_at,
+        pickup_at=route.pickup_at,
+        pantry_arrival_at=route.pantry_arrival_at,
         finish_at=route.finish_at,
         drive_minutes=route.drive_minutes,
         waiting_minutes=route.waiting_minutes,
+        facility_waiting_minutes=route.facility_waiting_minutes,
+        requested_time_deviation_minutes=(
+            route.requested_time_deviation_minutes
+        ),
+        within_preferred_window=route.within_preferred_window,
         destination_minutes=route.destination_minutes,
         pantry_priority=route.pantry_priority,
         route_score=route.score,
@@ -1362,7 +1468,12 @@ def _aggregate_metrics(values: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "averageDriveMinutes",
         "averageDistanceMiles",
         "averageWaitingMinutes",
+        "averagePredepartureWaitMinutes",
+        "averageFacilityWaitingMinutes",
+        "averageRequestedTimeDeviationMinutes",
+        "preferredWindowFitRate",
         "averageTotalTripDurationMinutes",
+        "averageElapsedFromLoginMinutes",
         "systemObjectiveValue",
         "driverAcceptanceRate",
         "expectedDriverAcceptanceRate",

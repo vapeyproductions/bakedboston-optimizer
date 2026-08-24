@@ -73,6 +73,49 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(routes[0].pantry_arrival_at, self.day.replace(hour=17, minute=25))
         self.assertEqual(routes[0].finish_at, self.day.replace(hour=17, minute=30))
 
+    def test_login_time_is_not_forced_departure_time(self) -> None:
+        request = DriverRequest(
+            earliest_start=self.day.replace(hour=16),
+            latest_finish=self.day.replace(hour=18),
+            start_location=self.start,
+            logged_at=self.day.replace(hour=14, minute=17),
+            search_until=self.day.replace(hour=19),
+        )
+        routes = rank_routes(
+            [self.bakery],
+            [self.pantry],
+            request,
+            FixedTravel({("start", "bakery"): 10, ("bakery", "pantry"): 20}),
+        )
+
+        self.assertEqual(len(routes), 1)
+        self.assertEqual(routes[0].depart_at, self.day.replace(hour=16, minute=50))
+        self.assertEqual(routes[0].pickup_at, self.day.replace(hour=17))
+        self.assertEqual(routes[0].finish_at, self.day.replace(hour=17, minute=30))
+        self.assertEqual(routes[0].waiting_minutes, 153)
+        self.assertEqual(routes[0].facility_waiting_minutes, 0)
+        self.assertTrue(routes[0].within_preferred_window)
+
+    def test_requested_time_window_is_soft_not_hard(self) -> None:
+        request = DriverRequest(
+            earliest_start=self.day.replace(hour=16),
+            latest_finish=self.day.replace(hour=16, minute=30),
+            start_location=self.start,
+            logged_at=self.day.replace(hour=14, minute=17),
+            search_until=self.day.replace(hour=18, minute=30),
+        )
+        routes = rank_routes(
+            [self.bakery],
+            [self.pantry],
+            request,
+            FixedTravel({("start", "bakery"): 10, ("bakery", "pantry"): 20}),
+        )
+
+        self.assertEqual(len(routes), 1)
+        self.assertEqual(routes[0].depart_at, self.day.replace(hour=16, minute=50))
+        self.assertEqual(routes[0].requested_time_deviation_minutes, 60)
+        self.assertFalse(routes[0].within_preferred_window)
+
     def test_claimed_pickup_is_excluded(self) -> None:
         claimed = BakeryPickup(**{**self.bakery.__dict__, "claimed": True})
         routes = rank_routes(
