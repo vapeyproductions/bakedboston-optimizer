@@ -72,6 +72,8 @@ def _compact_day(day: dict[str, Any], *, include_trace: bool) -> dict[str, Any]:
             "feasibleCandidatesEvaluated",
             "routesOffered",
             "routesAccepted",
+            "pickupWindows",
+            "pantryWindows",
         )
     }
     compact["selections"] = day["offers"]
