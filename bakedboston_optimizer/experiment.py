@@ -29,6 +29,7 @@ from .network import NetworkSnapshot
 from .optimizer import (
     OptimizationWeights,
     active_solver_backend,
+    allocate_recommendation_layer,
     enumerate_assignment_candidates,
     optimize_assignment_candidates,
     solver_version,
@@ -1127,48 +1128,132 @@ def _recommendation_ranks(
     epoch: datetime,
     limit: int = 5,
 ) -> dict[tuple[str, str, str], int]:
-    """Return the conflict-free, ranked routes actually shown to each driver.
+    """Build fair, conflict-free simultaneous recommendation menus.
 
-    The joint solve may reserve a bakery for another simultaneous driver. Those
-    conflicting routes remain in the auditable feasible set, but are not shown
-    as selectable recommendations. Within each resulting driver list, the
-    selected route is always rank one under the active policy.
+    Primary assignments are rank one. Then recommendation ranks are allocated
+    as global layers: maximize the number of drivers receiving rank N before
+    maximizing that layer's route quality. A bakery pickup is owned by only one
+    simultaneous driver's menu, while pantry destinations may repeat. This
+    prevents one driver from receiving extra options while another receives no
+    option whenever enough distinct feasible bakery pickups exist.
     """
 
-    selected_pickup_by_request = {
-        item.request_id: item.route.bakery_id for item in selected
-    }
-    ranks: dict[tuple[str, str, str], int] = {}
     request_ids = sorted({item.request_id for item in candidates})
-    for request_id in request_ids:
-        pickups_reserved_elsewhere = {
-            pickup_id
-            for other_request, pickup_id in selected_pickup_by_request.items()
-            if other_request != request_id
+    ranks: dict[tuple[str, str, str], int] = {}
+    shown_keys: set[tuple[str, str, str]] = set()
+    pickup_owner: dict[str, str] = {}
+    recommendation_counts = {request_id: 0 for request_id in request_ids}
+
+    for item in selected:
+        key = _candidate_key(item)
+        ranks[key] = 1
+        shown_keys.add(key)
+        pickup_owner[item.route.bakery_id] = item.request_id
+        recommendation_counts[item.request_id] = 1
+
+    # A baseline policy can occasionally leave a feasible driver unmatched.
+    # Repair rank one without disturbing any already-selected assignment.
+    first_layer = _allocate_menu_layer(
+        policy,
+        candidates,
+        pickups,
+        seed,
+        epoch,
+        eligible_requests={
+            request_id
+            for request_id, count in recommendation_counts.items()
+            if count == 0
+        },
+        pickup_owner=pickup_owner,
+        shown_keys=shown_keys,
+    )
+    for item in first_layer:
+        key = _candidate_key(item)
+        ranks[key] = 1
+        shown_keys.add(key)
+        pickup_owner.setdefault(item.route.bakery_id, item.request_id)
+        recommendation_counts[item.request_id] = 1
+
+    for rank in range(2, limit + 1):
+        eligible_requests = {
+            request_id
+            for request_id, count in recommendation_counts.items()
+            if count == rank - 1
         }
-        eligible = [
-            item
-            for item in candidates
-            if item.request_id == request_id
-            and item.route.bakery_id not in pickups_reserved_elsewhere
-        ]
-        ranked = sorted(
-            eligible,
-            key=_policy_sort_key(policy, pickups, seed, epoch),
+        if not eligible_requests:
+            break
+        layer = _allocate_menu_layer(
+            policy,
+            candidates,
+            pickups,
+            seed,
+            epoch,
+            eligible_requests=eligible_requests,
+            pickup_owner=pickup_owner,
+            shown_keys=shown_keys,
         )
-        selected_candidate = next(
-            (item for item in selected if item.request_id == request_id),
-            None,
-        )
-        if selected_candidate is not None:
-            selected_key = _candidate_key(selected_candidate)
-            ranked = [
-                selected_candidate,
-                *(item for item in ranked if _candidate_key(item) != selected_key),
-            ]
-        for rank, candidate in enumerate(ranked[:limit], start=1):
-            ranks[_candidate_key(candidate)] = rank
+        if not layer:
+            break
+        for item in layer:
+            key = _candidate_key(item)
+            ranks[key] = rank
+            shown_keys.add(key)
+            pickup_owner.setdefault(item.route.bakery_id, item.request_id)
+            recommendation_counts[item.request_id] = rank
     return ranks
+
+
+def _allocate_menu_layer(
+    policy: RoutingPolicy,
+    candidates: Sequence[AssignmentCandidate],
+    pickups: dict[str, BakeryPickup],
+    seed: int,
+    epoch: datetime,
+    *,
+    eligible_requests: set[str],
+    pickup_owner: dict[str, str],
+    shown_keys: set[tuple[str, str, str]],
+) -> tuple[AssignmentCandidate, ...]:
+    eligible = [
+        item
+        for item in candidates
+        if item.request_id in eligible_requests
+        and _candidate_key(item) not in shown_keys
+        and pickup_owner.get(item.route.bakery_id, item.request_id)
+        == item.request_id
+    ]
+    if not eligible:
+        return ()
+    utilities = _recommendation_utilities(
+        policy,
+        eligible,
+        pickups,
+        seed,
+        epoch,
+    )
+    return allocate_recommendation_layer(eligible, utilities)
+
+
+def _recommendation_utilities(
+    policy: RoutingPolicy,
+    candidates: Sequence[AssignmentCandidate],
+    pickups: dict[str, BakeryPickup],
+    seed: int,
+    epoch: datetime,
+) -> dict[tuple[str, str, str], float]:
+    """Translate any comparison policy's best-first order into MIP utilities."""
+
+    result: dict[tuple[str, str, str], float] = {}
+    key = _policy_sort_key(policy, pickups, seed, epoch)
+    grouped: dict[str, list[AssignmentCandidate]] = defaultdict(list)
+    for item in candidates:
+        grouped[item.request_id].append(item)
+    for request_candidates in grouped.values():
+        ordered = sorted(request_candidates, key=key)
+        size = len(ordered)
+        for index, item in enumerate(ordered):
+            result[_candidate_key(item)] = float(size - index)
+    return result
 
 
 def _stable_uniform(seed: int, *parts: str) -> float:

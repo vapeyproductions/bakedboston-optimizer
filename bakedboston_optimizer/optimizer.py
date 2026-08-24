@@ -6,7 +6,7 @@ from itertools import product
 import atexit
 import os
 from threading import RLock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from .models import (
     AssignmentCandidate,
@@ -176,6 +176,104 @@ def optimize_assignment_candidates(
 
     with _SOLVER_LOCK:
         return _optimize_network_with_gurobi(candidate_list)
+
+
+def allocate_recommendation_layer(
+    candidates: Sequence[AssignmentCandidate],
+    utilities: dict[tuple[str, str, str], float] | None = None,
+) -> tuple[AssignmentCandidate, ...]:
+    """Allocate one conflict-free recommendation to as many drivers as possible.
+
+    This auxiliary assignment is used to build simultaneous recommendation
+    menus.  Its lexicographic objective is deliberately fairness-first:
+
+    1. maximize the number of drivers receiving this recommendation rank;
+    2. among those maximum-cardinality allocations, maximize route utility.
+
+    A bakery pickup occurrence may be placed in only one driver's menu. Pantry
+    windows are not exclusive because they can receive multiple deliveries.
+    """
+
+    candidate_list = list(candidates)
+    if not candidate_list:
+        return ()
+    utility_by_key = utilities or {
+        _assignment_key(candidate): candidate.route.score
+        for candidate in candidate_list
+    }
+    if gp is None:
+        return _exact_recommendation_layer(candidate_list, utility_by_key)
+
+    with _SOLVER_LOCK:
+        model = _model("bakedboston_recommendation_layer")
+        try:
+            route_vars = {
+                index: model.addVar(vtype=GRB.BINARY, name=f"recommend_{index}")
+                for index in range(len(candidate_list))
+            }
+            for request_id in sorted({item.request_id for item in candidate_list}):
+                model.addConstr(
+                    gp.quicksum(
+                        route_vars[index]
+                        for index, item in enumerate(candidate_list)
+                        if item.request_id == request_id
+                    ) <= 1,
+                    name=f"request_{_safe_name(request_id)}_one_recommendation",
+                )
+            for driver_id in sorted({item.driver_id for item in candidate_list}):
+                model.addConstr(
+                    gp.quicksum(
+                        route_vars[index]
+                        for index, item in enumerate(candidate_list)
+                        if item.driver_id == driver_id
+                    ) <= 1,
+                    name=f"driver_{_safe_name(driver_id)}_one_recommendation",
+                )
+            for pickup_id in sorted({item.route.bakery_id for item in candidate_list}):
+                model.addConstr(
+                    gp.quicksum(
+                        route_vars[index]
+                        for index, item in enumerate(candidate_list)
+                        if item.route.bakery_id == pickup_id
+                    ) <= 1,
+                    name=f"pickup_{_safe_name(pickup_id)}_one_menu_owner",
+                )
+
+            model.ModelSense = GRB.MAXIMIZE
+            model.setObjectiveN(
+                gp.quicksum(route_vars.values()),
+                index=0,
+                priority=2,
+                weight=1.0,
+                name="maximize_drivers_with_recommendations",
+            )
+            model.setObjectiveN(
+                gp.quicksum(
+                    utility_by_key.get(_assignment_key(item), item.route.score)
+                    * route_vars[index]
+                    for index, item in enumerate(candidate_list)
+                ),
+                index=1,
+                priority=1,
+                weight=1.0,
+                name="maximize_recommendation_quality",
+            )
+            model.optimize()
+            if (
+                model.Status not in {GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.TIME_LIMIT}
+                or model.SolCount < 1
+            ):
+                raise RuntimeError(
+                    "Gurobi could not allocate the recommendation layer "
+                    f"(status {model.Status})."
+                )
+            return tuple(
+                item
+                for index, item in enumerate(candidate_list)
+                if route_vars[index].X > 0.5
+            )
+        finally:
+            model.dispose()
 
 
 def enumerate_assignment_candidates(
@@ -401,6 +499,117 @@ def _greedy_assignment(candidates: list[AssignmentCandidate]) -> list[Assignment
         used_drivers.add(candidate.driver_id)
         used_pickups.add(candidate.route.bakery_id)
     return chosen
+
+
+def _exact_recommendation_layer(
+    candidates: list[AssignmentCandidate],
+    utilities: dict[tuple[str, str, str], float],
+) -> tuple[AssignmentCandidate, ...]:
+    """Small deterministic fallback for the auxiliary menu-allocation model."""
+
+    # Only the best pantry route matters for a given request/pickup pair in one
+    # menu layer. Collapsing those alternatives keeps the exact fallback small
+    # when Gurobi is unavailable without changing the assignment decision.
+    best_by_request_pickup: dict[tuple[str, str], AssignmentCandidate] = {}
+    for item in candidates:
+        pair = (item.request_id, item.route.bakery_id)
+        incumbent = best_by_request_pickup.get(pair)
+        item_key = (
+            -utilities.get(_assignment_key(item), item.route.score),
+            item.route.pantry_id,
+        )
+        incumbent_key = (
+            -utilities.get(_assignment_key(incumbent), incumbent.route.score),
+            incumbent.route.pantry_id,
+        ) if incumbent is not None else None
+        if incumbent_key is None or item_key < incumbent_key:
+            best_by_request_pickup[pair] = item
+
+    options_by_request: dict[str, list[AssignmentCandidate]] = {}
+    for item in best_by_request_pickup.values():
+        options_by_request.setdefault(item.request_id, []).append(item)
+    for request_options in options_by_request.values():
+        request_options.sort(
+            key=lambda item: (
+                -utilities.get(_assignment_key(item), item.route.score),
+                item.route.bakery_id,
+                item.route.pantry_id,
+            )
+        )
+    request_ids = sorted(options_by_request)
+    best_count = -1
+    best_utility = float("-inf")
+    best_keys: tuple[tuple[str, str, str], ...] = ()
+    best_items: tuple[AssignmentCandidate, ...] = ()
+
+    def visit(
+        request_index: int,
+        chosen: tuple[AssignmentCandidate, ...],
+        used_requests: frozenset[str],
+        used_drivers: frozenset[str],
+        used_pickups: frozenset[str],
+        total_utility: float,
+    ) -> None:
+        nonlocal best_count, best_utility, best_keys, best_items
+        if len(chosen) + len(request_ids) - request_index < best_count:
+            return
+        if request_index == len(request_ids):
+            keys = tuple(sorted(_assignment_key(item) for item in chosen))
+            if (
+                len(chosen) > best_count
+                or (
+                    len(chosen) == best_count
+                    and (
+                        total_utility > best_utility + 1e-9
+                        or (
+                            abs(total_utility - best_utility) <= 1e-9
+                            and (not best_keys or keys < best_keys)
+                        )
+                    )
+                )
+            ):
+                best_count = len(chosen)
+                best_utility = total_utility
+                best_keys = keys
+                best_items = chosen
+            return
+
+        request_id = request_ids[request_index]
+        visit(
+            request_index + 1,
+            chosen,
+            used_requests,
+            used_drivers,
+            used_pickups,
+            total_utility,
+        )
+        for item in options_by_request[request_id]:
+            if (
+                item.request_id in used_requests
+                or item.driver_id in used_drivers
+                or item.route.bakery_id in used_pickups
+            ):
+                continue
+            visit(
+                request_index + 1,
+                (*chosen, item),
+                used_requests | {item.request_id},
+                used_drivers | {item.driver_id},
+                used_pickups | {item.route.bakery_id},
+                total_utility
+                + utilities.get(_assignment_key(item), item.route.score),
+            )
+
+    visit(0, (), frozenset(), frozenset(), frozenset(), 0.0)
+    return best_items
+
+
+def _assignment_key(candidate: AssignmentCandidate) -> tuple[str, str, str]:
+    return (
+        candidate.request_id,
+        candidate.route.bakery_id,
+        candidate.route.pantry_id,
+    )
 
 
 def _model(name: str) -> "gp_typing.Model":

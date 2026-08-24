@@ -4,8 +4,20 @@ import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from bakedboston_optimizer.models import BakeryPickup, DriverRequest, Location, Pantry
-from bakedboston_optimizer.optimizer import OptimizationWeights, optimize_network, rank_routes
+from bakedboston_optimizer.models import (
+    AssignmentCandidate,
+    BakeryPickup,
+    DriverRequest,
+    Location,
+    Pantry,
+    RouteCandidate,
+)
+from bakedboston_optimizer.optimizer import (
+    OptimizationWeights,
+    allocate_recommendation_layer,
+    optimize_network,
+    rank_routes,
+)
 from bakedboston_optimizer.google_maps import _duration_minutes
 
 
@@ -217,6 +229,55 @@ class OptimizerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.assignments[0].route.pantry_id, "p1")
+
+    def test_recommendation_layer_serves_more_drivers_before_adding_quality(self) -> None:
+        candidates = [
+            self.assignment("r1", "d1", "b1", "p1", 100),
+            self.assignment("r1", "d1", "b2", "p1", 90),
+            self.assignment("r2", "d2", "b1", "p1", 80),
+        ]
+
+        allocated = allocate_recommendation_layer(candidates)
+
+        self.assertEqual(len(allocated), 2)
+        self.assertEqual(
+            {(item.request_id, item.route.bakery_id) for item in allocated},
+            {("r1", "b2"), ("r2", "b1")},
+        )
+        # The same pantry can appear in both menus; only bakery pickups are scarce.
+        self.assertEqual({item.route.pantry_id for item in allocated}, {"p1"})
+
+    def assignment(
+        self,
+        request_id: str,
+        driver_id: str,
+        bakery_id: str,
+        pantry_id: str,
+        score: float,
+    ) -> AssignmentCandidate:
+        timestamp = self.day.replace(hour=17)
+        return AssignmentCandidate(
+            request_id=request_id,
+            driver_id=driver_id,
+            route=RouteCandidate(
+                bakery_id=bakery_id,
+                bakery_name=bakery_id,
+                bakery_address=f"{bakery_id} address",
+                pantry_id=pantry_id,
+                pantry_name=pantry_id,
+                pantry_address=f"{pantry_id} address",
+                depart_at=timestamp,
+                pickup_at=timestamp,
+                pantry_arrival_at=timestamp,
+                finish_at=timestamp,
+                drive_minutes=10,
+                waiting_minutes=0,
+                destination_minutes=0,
+                pantry_priority=0.5,
+                score=score,
+                explanation=(),
+            ),
+        )
 
 
 if __name__ == "__main__":

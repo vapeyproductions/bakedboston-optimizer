@@ -321,6 +321,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertTrue(all(day.pantry_windows for day in report.days))
         for epoch in epochs:
             serialized = epoch.as_dict()
+            pickup_owners: dict[str, set[str]] = defaultdict(set)
             for driver in serialized["driverRecommendations"]:
                 if driver["selectedRoute"] is not None:
                     self.assertEqual(
@@ -328,12 +329,16 @@ class ExperimentTests(unittest.TestCase):
                         1,
                     )
                 for route in driver["routes"]:
+                    pickup_owners[route["pickupId"]].add(driver["requestId"])
                     self.assertIn("acceptanceProbability", route)
                     self.assertIn("distanceMiles", route)
                     self.assertIn("totalTripMinutes", route)
                     self.assertIn("driverStart", route)
                     self.assertIn("bakeryLocation", route)
                     self.assertIn("pantryLocation", route)
+            self.assertTrue(
+                all(len(owners) == 1 for owners in pickup_owners.values())
+            )
 
     def test_summary_csv_contains_one_row_per_horizon_and_policy(self) -> None:
         result = compare_horizons(

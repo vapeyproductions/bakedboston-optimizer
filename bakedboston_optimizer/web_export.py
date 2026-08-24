@@ -163,9 +163,21 @@ def build_web_payload(
         "objectiveWeights": asdict(weights),
         "network": _network_payload(snapshot),
         "selectionRule": (
-            "After the joint Gurobi solve resolves simultaneous-driver conflicts, "
-            "each driver's conflict-free recommendations are ranked and rank 1 is selected."
+            "The joint Gurobi solve first maximizes the number of simultaneous drivers who receive "
+            "a distinct bakery pickup. Each bakery pickup is temporarily owned by one driver's menu, "
+            "while pantry destinations may repeat. Menus are then filled in fairness rounds: every "
+            "feasible driver receives recommendation 1 before any driver receives recommendation 2, "
+            "and so on. Each driver selects rank 1."
         ),
+        "recommendationAllocation": {
+            "bakeryPickupExclusiveAcrossMenus": True,
+            "pantryDestinationsMayRepeat": True,
+            "menuConstruction": "cardinality_first_fairness_layers",
+            "zeroRecommendationRule": (
+                "A driver receives no recommendation only when there are fewer distinct feasible "
+                "bakery pickups than simultaneous drivers or that driver has no time-feasible route."
+            ),
+        },
         "metricMethodology": {
             "actualSelection": "Every simulated driver selects recommendation rank 1.",
             "acceptanceModel": (

@@ -122,9 +122,20 @@ driver at every decision time. The sequence is explicit and auditable:
 1. generate every time-feasible driver–bakery–pantry candidate;
 2. solve all drivers entering the same decision epoch jointly, so a bakery
    pickup cannot be offered to two drivers;
-3. remove routes whose bakery was assigned to another driver;
-4. rank each driver's remaining routes from highest to lowest policy score; and
+3. assign each bakery pickup to one temporary menu owner while allowing the
+   same pantry to appear in multiple drivers' routes;
+4. build menus in fairness layers: maximize the number of drivers receiving
+   recommendation #1 before optimizing its quality, then do the same for
+   recommendation #2, and so on; and
 5. mark rank **#1** as the route selected by that driver.
+
+This cardinality-first rule prevents a driver from receiving zero options just
+so another driver can receive an extra option. Every simultaneous driver gets
+one distinct feasible bakery pickup before anyone gets a second, and every
+driver gets a second before anyone gets a third. A zero-option menu remains
+possible only when there are fewer distinct feasible bakery pickups than active
+drivers, or when that driver has no time-feasible route. Because pantry windows
+can receive multiple donations, pantry overlap does not create a conflict.
 
 The selected route is therefore always the highest-scoring route in the
 conflict-free recommendation list actually displayed to that driver. The JSON
