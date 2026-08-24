@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import unittest
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from datetime import date, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -284,6 +284,18 @@ class ExperimentTests(unittest.TestCase):
             ),
         )
 
+        daily_driver_counts = [len(day.requests) for day in scenario.days]
+        epoch_driver_counts = [
+            count
+            for day in scenario.days
+            for count in Counter(
+                request.earliest_start for request in day.requests
+            ).values()
+        ]
+        self.assertTrue(all(1 <= count <= 7 for count in daily_driver_counts))
+        self.assertTrue(any(count < 7 for count in daily_driver_counts))
+        self.assertTrue(all(1 <= count <= 3 for count in epoch_driver_counts))
+
         report = next(
             item
             for item in compare_policies(
@@ -305,6 +317,8 @@ class ExperimentTests(unittest.TestCase):
         ]
         self.assertTrue(selected)
         self.assertTrue(all(item.recommendation_rank == 1 for item in selected))
+        self.assertTrue(all(day.pickup_windows for day in report.days))
+        self.assertTrue(all(day.pantry_windows for day in report.days))
         for epoch in epochs:
             serialized = epoch.as_dict()
             for driver in serialized["driverRecommendations"]:

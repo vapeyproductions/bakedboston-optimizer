@@ -304,6 +304,8 @@ class PolicyDayResult:
     offers: tuple[ExperimentAssignment, ...]
     solver_runs: tuple[SolverDiagnostics, ...]
     decision_epochs: tuple[DecisionEpochResult, ...]
+    pickup_windows: tuple[BakeryPickup, ...]
+    pantry_windows: tuple[Pantry, ...]
 
     @property
     def completed(self) -> tuple[ExperimentAssignment, ...]:
@@ -319,6 +321,27 @@ class PolicyDayResult:
             "feasibleCandidatesEvaluated": self.feasible_candidates,
             "routesOffered": len(self.offers),
             "routesAccepted": len(self.completed),
+            "pickupWindows": [
+                {
+                    "pickupId": item.id,
+                    "bakeryName": item.bakery_name,
+                    "readyAt": item.ready_at.isoformat(),
+                    "pickupDeadline": item.pickup_deadline.isoformat(),
+                }
+                for item in self.pickup_windows
+            ],
+            "pantryWindows": [
+                {
+                    "pantryWindowId": item.id,
+                    "pantryName": item.pantry_name,
+                    "receivingStart": item.receiving_start.isoformat(),
+                    "receivingEnd": item.receiving_end.isoformat(),
+                    "latestPermittedArrival": (
+                        item.latest_permitted_arrival.isoformat()
+                    ),
+                }
+                for item in self.pantry_windows
+            ],
             "offers": [item.as_dict() for item in self.offers],
             "solverRuns": [_solver_dict(item) for item in self.solver_runs],
             "decisionEpochs": [item.as_dict() for item in self.decision_epochs],
@@ -650,6 +673,8 @@ def run_policy(
             offers=tuple(offers),
             solver_runs=tuple(diagnostics),
             decision_epochs=tuple(decision_epochs),
+            pickup_windows=tuple(day.pickups),
+            pantry_windows=tuple(day.pantries),
         ))
 
     return PolicyReport(
@@ -839,47 +864,56 @@ def _rolling_driver_requests(
     max_simultaneous_drivers: int,
     rng: random.Random,
 ) -> list[DriverRequest]:
-    if not pickups or not pantries:
+    if not pickups or not pantries or count <= 0:
         return []
     locations = [item.location for item in pickups] + [item.location for item in pantries]
     center_latitude = sum(item.latitude for item in locations) / len(locations)
     center_longitude = sum(item.longitude for item in locations) / len(locations)
     requests: list[DriverRequest] = []
-    epoch_counts: dict[datetime, int] = defaultdict(int)
     offsets = (60, 45, 30, 15, 0)
-    for index in range(count):
-        pickup_anchor = pickups[index % len(pickups)] if index < len(pickups) else rng.choice(pickups)
+    active_count = rng.randint(1, count)
+    remaining = active_count
+    request_index = 0
+    used_epochs: set[datetime] = set()
+
+    while remaining:
+        group_size = rng.randint(1, min(max_simultaneous_drivers, remaining))
+        pickup_anchor = rng.choice(pickups)
         raw_start = pickup_anchor.ready_at - timedelta(minutes=rng.choice(offsets))
         earliest = _floor_epoch(raw_start, interval_minutes)
-        while epoch_counts[earliest] >= max_simultaneous_drivers:
+        while earliest in used_epochs:
             earliest += timedelta(minutes=interval_minutes)
-        epoch_counts[earliest] += 1
-        latest = earliest + timedelta(minutes=rng.choice((90, 120, 150, 180)))
-        start = Location(
-            address_entered=f"synthetic-driver-{index + 1}-origin",
-            formatted_address="Synthetic Boston-area origin",
-            latitude=center_latitude + rng.uniform(-0.025, 0.025),
-            longitude=center_longitude + rng.uniform(-0.035, 0.035),
-            validation_status=AddressValidationStatus.VALIDATED,
-        )
-        preferred: Location | None = None
-        if rng.random() < 0.65:
-            anchor = rng.choice(pantries).location
-            preferred = Location(
-                address_entered=f"synthetic-driver-{index + 1}-destination",
-                formatted_address="Synthetic preferred destination",
-                latitude=anchor.latitude + rng.uniform(-0.01, 0.01),
-                longitude=anchor.longitude + rng.uniform(-0.01, 0.01),
+        used_epochs.add(earliest)
+
+        for _ in range(group_size):
+            request_index += 1
+            latest = earliest + timedelta(minutes=rng.choice((90, 120, 150, 180)))
+            start = Location(
+                address_entered=f"synthetic-driver-{request_index}-origin",
+                formatted_address="Synthetic Boston-area origin",
+                latitude=center_latitude + rng.uniform(-0.025, 0.025),
+                longitude=center_longitude + rng.uniform(-0.035, 0.035),
                 validation_status=AddressValidationStatus.VALIDATED,
             )
-        requests.append(DriverRequest(
-            id=f"request-{earliest.date().isoformat()}-{index + 1}",
-            driver_id=f"synthetic-driver-{index + 1}",
-            earliest_start=earliest,
-            latest_finish=latest,
-            start_location=start,
-            preferred_destination=preferred,
-        ))
+            preferred: Location | None = None
+            if rng.random() < 0.65:
+                anchor = rng.choice(pantries).location
+                preferred = Location(
+                    address_entered=f"synthetic-driver-{request_index}-destination",
+                    formatted_address="Synthetic preferred destination",
+                    latitude=anchor.latitude + rng.uniform(-0.01, 0.01),
+                    longitude=anchor.longitude + rng.uniform(-0.01, 0.01),
+                    validation_status=AddressValidationStatus.VALIDATED,
+                )
+            requests.append(DriverRequest(
+                id=f"request-{earliest.date().isoformat()}-{request_index}",
+                driver_id=f"synthetic-driver-{request_index}",
+                earliest_start=earliest,
+                latest_finish=latest,
+                start_location=start,
+                preferred_destination=preferred,
+            ))
+        remaining -= group_size
     return sorted(requests, key=lambda item: (item.earliest_start, item.id))
 
 
