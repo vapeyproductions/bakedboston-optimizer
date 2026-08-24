@@ -49,6 +49,23 @@ class ApiEntrypointTests(unittest.TestCase):
         self.assertEqual(result, {"mode": "academic_schedule_simulation"})
         mocked.assert_called_once_with(payload)
 
+    @patch("api.recommendations.simulate_custom_experiment")
+    def test_custom_mode_dispatches_to_comparison_experiment(self, mocked) -> None:
+        mocked.return_value = {"displayMode": "live_custom_gurobi_experiment"}
+        payload = {
+            "mode": "custom_experiment",
+            "days": 5,
+            "driversPerDay": 6,
+            "bakeryCount": 9,
+            "pantryCount": 9,
+            "randomSeed": 2042,
+        }
+
+        result = _dispatch(payload)
+
+        self.assertEqual(result, {"displayMode": "live_custom_gurobi_experiment"})
+        mocked.assert_called_once_with(payload)
+
 
 if __name__ == "__main__":
     unittest.main()

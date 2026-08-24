@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 
 from bakedboston_optimizer.network import parse_snapshot
-from bakedboston_optimizer.service import _pantries
+from bakedboston_optimizer.service import _pantries, simulate_custom_experiment
 
 
 class ServiceFeasibilityTests(unittest.TestCase):
@@ -81,6 +82,39 @@ class ServiceFeasibilityTests(unittest.TestCase):
         snapshot = parse_snapshot(payload)
 
         self.assertEqual(_pantries(snapshot, self.earliest, self.latest), [])
+
+
+class CustomExperimentTests(unittest.TestCase):
+    @patch("bakedboston_optimizer.service.build_web_payload")
+    def test_custom_experiment_samples_requested_network_and_preserves_controls(self, mocked_build) -> None:
+        mocked_build.return_value = {
+            "scenario": {},
+            "runtime": {"solverBackend": "gurobi"},
+        }
+
+        result = simulate_custom_experiment({
+            "days": 4,
+            "driversPerDay": 5,
+            "bakeryCount": 4,
+            "pantryCount": 3,
+            "randomSeed": 77,
+            "maxSimultaneousDrivers": 2,
+        })
+
+        sampled_snapshot = mocked_build.call_args.args[0]
+        self.assertEqual(len(sampled_snapshot.eligible_bakeries), 4)
+        self.assertEqual(len(sampled_snapshot.eligible_pantries), 3)
+        self.assertEqual(mocked_build.call_args.kwargs["days"], 4)
+        self.assertEqual(mocked_build.call_args.kwargs["drivers_per_day"], 5)
+        self.assertEqual(mocked_build.call_args.kwargs["seed"], 77)
+        self.assertEqual(mocked_build.call_args.kwargs["max_simultaneous_drivers"], 2)
+        self.assertEqual(result["displayMode"], "live_custom_gurobi_experiment")
+        self.assertEqual(result["scenario"]["bakeryCount"], 4)
+        self.assertEqual(result["scenario"]["pantryCount"], 3)
+
+    def test_custom_experiment_rejects_unbounded_driver_request(self) -> None:
+        with self.assertRaisesRegex(ValueError, "driversPerDay"):
+            simulate_custom_experiment({"driversPerDay": 13})
 
 
 if __name__ == "__main__":

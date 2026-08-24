@@ -148,6 +148,10 @@ def build_web_payload(
         weights=weights,
     )
     payload = _compact_comparison(comparison.as_dict())
+    payload["scenario"].update({
+        "bakeryCount": len(snapshot.eligible_bakeries),
+        "pantryCount": len(snapshot.eligible_pantries),
+    })
     payload.update({
         "schemaVersion": 2,
         "displayMode": "interactive_replay_of_precomputed_gurobi_experiment",

@@ -7,7 +7,12 @@ from http.server import BaseHTTPRequestHandler
 from typing import Any
 
 from bakedboston_optimizer.optimizer import GurobiUnavailableError
-from bakedboston_optimizer.service import recommend, recommend_network, simulate_network
+from bakedboston_optimizer.service import (
+    recommend,
+    recommend_network,
+    simulate_custom_experiment,
+    simulate_network,
+)
 
 MAX_REQUEST_BYTES = 1_000_000
 
@@ -19,6 +24,8 @@ def _dispatch(payload: dict[str, Any]) -> dict[str, Any]:
         return recommend_network(payload)
     if payload.get("mode") == "schedule_simulation":
         return simulate_network(payload)
+    if payload.get("mode") == "custom_experiment":
+        return simulate_custom_experiment(payload)
     return recommend(payload)
 
 

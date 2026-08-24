@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-import os
 import json
+import os
+import random
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from .google_maps import GoogleMapsProvider
 from .models import AddressValidationStatus, BakeryPickup, DriverRequest, Location, Pantry
-from .network import BakedBostonNetworkClient, NetworkSnapshot
+from .network import BakedBostonNetworkClient, NetworkSnapshot, parse_snapshot
 from .optimizer import active_solver_backend, optimize_network, rank_routes
 from .simulation import SimulationConfig, simulate_snapshot
 from .travel import HaversineTravelTimeProvider
+from .web_export import build_web_payload
 
 
 def recommend(payload: dict[str, Any]) -> dict[str, Any]:
@@ -195,6 +199,74 @@ def simulate_network(payload: dict[str, Any]) -> dict[str, Any]:
             "explanation": list(assignment.route.explanation),
         } for assignment in result.assignments],
     }
+
+
+def simulate_custom_experiment(payload: dict[str, Any]) -> dict[str, Any]:
+    """Run a bounded, reproducible six-policy academic experiment.
+
+    The public simulator may vary the size of the synthetic network, but every
+    comparison policy receives the exact same institutions, driver events, and
+    random seed.  The Gurobi MIP therefore remains directly comparable with the
+    five benchmark policies.
+    """
+
+    days = _bounded_int(payload.get("days", 5), "days", 3, 5)
+    drivers_per_day = _bounded_int(
+        payload.get("driversPerDay", 6), "driversPerDay", 1, 12
+    )
+    bakery_count = _bounded_int(payload.get("bakeryCount", 9), "bakeryCount", 2, 9)
+    pantry_count = _bounded_int(payload.get("pantryCount", 9), "pantryCount", 2, 9)
+    random_seed = _bounded_int(
+        payload.get("randomSeed", 2042), "randomSeed", 1, 999_999_999
+    )
+    max_simultaneous_drivers = _bounded_int(
+        payload.get("maxSimultaneousDrivers", 3),
+        "maxSimultaneousDrivers",
+        2,
+        3,
+    )
+
+    fixture_path = (
+        Path(__file__).resolve().parents[1]
+        / "data"
+        / "academic_comparison_snapshot.json"
+    )
+    fixture = json.loads(fixture_path.read_text())
+    if not isinstance(fixture, dict):
+        raise TypeError("The academic network fixture must be a JSON object")
+    source_snapshot = parse_snapshot(fixture)
+    bakeries = list(source_snapshot.eligible_bakeries)
+    pantries = list(source_snapshot.eligible_pantries)
+    if bakery_count > len(bakeries) or pantry_count > len(pantries):
+        raise ValueError("Requested network size exceeds the academic fixture")
+
+    rng = random.Random(random_seed)
+    selected_bakeries = tuple(
+        sorted(rng.sample(bakeries, bakery_count), key=lambda item: item.id)
+    )
+    selected_pantries = tuple(
+        sorted(rng.sample(pantries, pantry_count), key=lambda item: item.id)
+    )
+    snapshot = replace(
+        source_snapshot,
+        bakeries=selected_bakeries,
+        pantries=selected_pantries,
+    )
+    result = build_web_payload(
+        snapshot,
+        start_date=date(2026, 8, 24),
+        days=days,
+        seed=random_seed,
+        drivers_per_day=drivers_per_day,
+        matching_interval_minutes=60,
+        max_simultaneous_drivers=max_simultaneous_drivers,
+    )
+    result["displayMode"] = "live_custom_gurobi_experiment"
+    result["scenario"].update({
+        "bakeryCount": bakery_count,
+        "pantryCount": pantry_count,
+    })
+    return result
 
 
 def _service_mode(snapshot: NetworkSnapshot, pantry_window_id: str) -> str:
