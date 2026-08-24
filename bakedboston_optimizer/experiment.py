@@ -871,19 +871,40 @@ def _rolling_driver_requests(
     center_latitude = sum(item.latitude for item in locations) / len(locations)
     center_longitude = sum(item.longitude for item in locations) / len(locations)
     requests: list[DriverRequest] = []
-    offsets = (60, 45, 30, 15, 0)
     active_count = rng.randint(1, count)
-    remaining = active_count
     request_index = 0
     used_epochs: set[datetime] = set()
 
-    while remaining:
-        group_size = rng.randint(1, min(max_simultaneous_drivers, remaining))
+    # Simultaneous arrivals should be an exception, not the default. Build one
+    # shared epoch on days with at least two active drivers and occasionally a
+    # second one on busier days. Every other driver enters at an independent
+    # minute-level time. ``max_simultaneous_drivers`` remains a cap rather than
+    # a target applied to every decision epoch.
+    simultaneous_epochs = 0
+    if active_count >= 2:
+        simultaneous_epochs = 1
+        if active_count >= 5 and rng.random() < 0.45:
+            simultaneous_epochs = 2
+
+    group_sizes = [2] * simultaneous_epochs
+    ungrouped = active_count - sum(group_sizes)
+    if (
+        max_simultaneous_drivers == 3
+        and group_sizes
+        and ungrouped >= 1
+        and rng.random() < 0.18
+    ):
+        group_sizes[rng.randrange(len(group_sizes))] = 3
+        ungrouped -= 1
+    group_sizes.extend([1] * ungrouped)
+    rng.shuffle(group_sizes)
+
+    for group_size in group_sizes:
         pickup_anchor = rng.choice(pickups)
-        raw_start = pickup_anchor.ready_at - timedelta(minutes=rng.choice(offsets))
-        earliest = _floor_epoch(raw_start, interval_minutes)
+        raw_start = pickup_anchor.ready_at - timedelta(minutes=rng.randint(0, 90))
+        earliest = raw_start.replace(second=0, microsecond=0)
         while earliest in used_epochs:
-            earliest += timedelta(minutes=interval_minutes)
+            earliest += timedelta(minutes=rng.randint(1, max(interval_minutes // 3, 1)))
         used_epochs.add(earliest)
 
         for _ in range(group_size):
@@ -914,7 +935,6 @@ def _rolling_driver_requests(
                 start_location=start,
                 preferred_destination=preferred,
             ))
-        remaining -= group_size
     return sorted(requests, key=lambda item: (item.earliest_start, item.id))
 
 

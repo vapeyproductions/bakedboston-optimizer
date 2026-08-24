@@ -295,6 +295,21 @@ class ExperimentTests(unittest.TestCase):
         self.assertTrue(all(1 <= count <= 7 for count in daily_driver_counts))
         self.assertTrue(any(count < 7 for count in daily_driver_counts))
         self.assertTrue(all(1 <= count <= 3 for count in epoch_driver_counts))
+        self.assertTrue(any(count == 1 for count in epoch_driver_counts))
+        self.assertTrue(any(count > 1 for count in epoch_driver_counts))
+        self.assertTrue(any(
+            request.earliest_start.minute % 15 != 0
+            for day in scenario.days
+            for request in day.requests
+        ))
+        for day in scenario.days:
+            daily_epochs = Counter(
+                request.earliest_start for request in day.requests
+            )
+            self.assertLessEqual(
+                sum(count > 1 for count in daily_epochs.values()),
+                2,
+            )
 
         report = next(
             item
