@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -14,6 +15,8 @@ from bakedboston_optimizer.models import (
 )
 from bakedboston_optimizer.optimizer import (
     OptimizationWeights,
+    _distance_outside_preference_area,
+    _normalize_spatial_deviation,
     allocate_recommendation_layer,
     optimize_network,
     rank_routes,
@@ -114,7 +117,17 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(len(routes), 1)
         self.assertEqual(routes[0].depart_at, self.day.replace(hour=16, minute=50))
         self.assertEqual(routes[0].requested_time_deviation_minutes, 60)
+        self.assertEqual(routes[0].requested_window_minutes, 30)
+        self.assertEqual(routes[0].requested_time_deviation_ratio, 2.0)
         self.assertFalse(routes[0].within_preferred_window)
+
+    def test_requested_window_must_be_at_least_thirty_minutes(self) -> None:
+        with self.assertRaisesRegex(ValueError, "at least 30 minutes"):
+            DriverRequest(
+                earliest_start=self.day.replace(hour=16),
+                latest_finish=self.day.replace(hour=16, minute=29),
+                start_location=self.start,
+            )
 
     def test_claimed_pickup_is_excluded(self) -> None:
         claimed = BakeryPickup(**{**self.bakery.__dict__, "claimed": True})
@@ -289,6 +302,49 @@ class OptimizerTests(unittest.TestCase):
         )
         # The same pantry can appear in both menus; only bakery pickups are scarce.
         self.assertEqual({item.route.pantry_id for item in allocated}, {"p1"})
+
+    def test_spatial_deviation_is_measured_to_zip_area_edge(self) -> None:
+        preference_center = Location("ZIP center", "ZIP center", 42.0, -71.0)
+        inside = Location("inside", "inside", 42.0, -71.01)
+        outside = Location("outside", "outside", 42.0, -70.9)
+
+        self.assertEqual(
+            _distance_outside_preference_area(inside, preference_center, 2.0),
+            0.0,
+        )
+        # At this latitude, 0.1 degrees of longitude is about 5.1 miles. The
+        # deviation is measured to the nearest edge of the two-mile circle.
+        self.assertAlmostEqual(
+            _distance_outside_preference_area(outside, preference_center, 2.0),
+            3.15,
+            delta=0.15,
+        )
+
+    def test_spatial_misses_are_normalized_without_exact_match_reward(self) -> None:
+        base_route = self.assignment("r1", "d1", "b1", "p1", 10).route
+        routes = [
+            replace(base_route, bakery_id="exact", origin_deviation_miles=0, destination_deviation_miles=0),
+            replace(base_route, bakery_id="middle", origin_deviation_miles=1, destination_deviation_miles=1),
+            replace(base_route, bakery_id="furthest", origin_deviation_miles=2, destination_deviation_miles=4),
+        ]
+        request = replace(
+            self.request,
+            preferred_destination=self.location("destination ZIP"),
+        )
+
+        normalized = _normalize_spatial_deviation(
+            routes,
+            request,
+            OptimizationWeights(spatial_deviation_ratio_penalty=18),
+        )
+        by_bakery = {route.bakery_id: route for route in normalized}
+
+        self.assertEqual(by_bakery["exact"].normalized_spatial_deviation, 0.0)
+        self.assertEqual(by_bakery["exact"].score, 10)
+        self.assertAlmostEqual(by_bakery["middle"].normalized_spatial_deviation, 0.375)
+        self.assertAlmostEqual(by_bakery["middle"].score, 3.25)
+        self.assertEqual(by_bakery["furthest"].normalized_spatial_deviation, 1.0)
+        self.assertEqual(by_bakery["furthest"].score, -8)
 
     def assignment(
         self,

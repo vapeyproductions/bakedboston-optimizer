@@ -47,20 +47,59 @@ Candidate quality is:
 
 \[
 q_{d,b,p} = 45\,priority_p - driveMinutes_{d,b,p}
-- 0.06\,originWaitMinutes_{d,b,p}
-- 0.80\,facilityWaitMinutes_{d,b,p}
-- 0.85\,timeDeviationMinutes_{d,b,p}
-- 0.65\,destinationMinutes_{d,b,p}
+- 24\,outsideWindowRatio_{d,b,p}
+- 18\,spatialDeviationRatio_{d,b,p}
 \]
 
 Opening the app creates a decision epoch; it does not force immediate
 departure. The route generator chooses a just-in-time departure, includes 5
 minutes to load at the bakery and 5 minutes to unload at the pantry, and shows
-the volunteer how long to wait before leaving. `timeDeviationMinutes` measures
-departure before the requested start plus completion after the requested
-finish, so the requested interval is an influential soft preference rather
-than a hard filter. A requested starting ZIP becomes that request's origin; an
-ending ZIP is represented by the post-drop-off `destinationMinutes` penalty.
+the volunteer when to leave. Waiting safely before that departure is not a
+route-quality penalty. Instead,
+
+\[
+outsideWindowRatio =
+\frac{\max(0, requestedStart-departure)+\max(0, finish-requestedFinish)}
+{requestedFinish-requestedStart}
+\]
+
+Only route time before or after the driver's requested interval is penalized.
+Dividing by the requested interval makes the same miss matter more for a tight
+request than for a broad one. Driver requests must span at least 30 minutes;
+the interval remains a soft preference, so a near miss may still be shown when
+it is the best feasible option.
+
+The optional starting and ending ZIP codes are soft preferences. Each ZIP is
+represented by a small estimated circular area around its center. The raw
+misses for route \(r=(d,b,p)\) are the shortest straight-line distances from
+the bakery and pantry to the corresponding requested areas:
+
+\[
+\delta^{start}_r = \max\{0,\ distance(b,startZIP_d)-radius^{start}_d\}
+\]
+
+\[
+\delta^{end}_r = \max\{0,\ distance(p,endZIP_d)-radius^{end}_d\}
+\]
+
+A facility inside its requested area has deviation zero. It receives no bonus;
+routes farther away only receive a penalty. For each driver, the two deviations
+are scaled against the largest corresponding deviation among that driver's
+feasible alternatives:
+
+\[
+spatialDeviationRatio_r = \frac{1}{K}
+\left(
+\frac{\delta^{start}_r}{\max_{j\in R_d}\delta^{start}_j}
++
+\frac{\delta^{end}_r}{\max_{j\in R_d}\delta^{end}_j}
+\right)
+\]
+
+where \(K\) is the number of supplied spatial preferences (one or two) and a
+component whose maximum is zero contributes zero. Thus the route with the
+smallest geographic miss is favored relative to the driver's other feasible
+choices without imposing a hard geographic cutoff.
 
 Constraints ensure that each request and physical driver receives at most one
 assignment, each bakery occurrence is used at most once, and every selected

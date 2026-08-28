@@ -69,7 +69,7 @@ given only to BakedBoston.
 - **BakedBoston MIP:** lexicographically maximizes assigned pickups, then total
   route quality across all drivers at that epoch.
 - **Random feasible:** selects a seeded random conflict-free assignment.
-- **Shortest route:** greedily minimizes driving plus waiting.
+- **Shortest route:** greedily minimizes driving time.
 - **Earliest deadline:** greedily serves the bakery pickup with the earliest
   pickup deadline.
 - **Highest priority:** greedily serves the pantry with the highest current
@@ -93,9 +93,11 @@ driver received and the highest-scoring route they selected.
 ## Synthetic driver acceptance
 
 An offered route is accepted with a seeded logistic probability that decreases
-with drive, waiting, and destination-deviation minutes. This is an explicit
-behavioral assumption, not a trained machine-learning model. It can be disabled
-for a pure routing-capacity experiment.
+with drive minutes, the proportional requested-time-window miss, and
+destination-deviation minutes. Planned waiting before departure is not treated
+as a burden. This is an explicit behavioral assumption, not a trained
+machine-learning model. It can be disabled for a pure routing-capacity
+experiment.
 
 ## Pantry opportunity history
 

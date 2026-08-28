@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from itertools import product
 import atexit
@@ -12,12 +12,13 @@ from .models import (
     AssignmentCandidate,
     BakeryPickup,
     DriverRequest,
+    Location,
     NetworkOptimizationResult,
     Pantry,
     RouteCandidate,
     SolverDiagnostics,
 )
-from .travel import TravelTimeProvider
+from .travel import TravelTimeProvider, _haversine_miles
 
 try:
     import gurobipy as gp
@@ -39,12 +40,18 @@ _WLS_ENVIRONMENT_SIGNATURE: tuple[str, str, str] | None = None
 class OptimizationWeights:
     pantry_priority_reward: float = 45.0
     drive_minute_penalty: float = 1.0
-    # Waiting before leaving is substantially less burdensome than waiting at
-    # a facility, but very distant future routes should still rank lower.
-    waiting_minute_penalty: float = 0.06
-    facility_waiting_minute_penalty: float = 0.80
-    destination_minute_penalty: float = 0.65
-    requested_time_deviation_minute_penalty: float = 0.85
+    # Retained as zero-valued compatibility fields. Waiting safely before a
+    # planned departure and waiting moved out of a facility are diagnostics,
+    # not route-quality penalties.
+    waiting_minute_penalty: float = 0.0
+    facility_waiting_minute_penalty: float = 0.0
+    # Kept for backwards compatibility with earlier saved experiment configs.
+    # Geographic fit is now a normalized straight-line deviation, not a travel-
+    # time reward or penalty.
+    destination_minute_penalty: float = 0.0
+    spatial_deviation_ratio_penalty: float = 18.0
+    requested_time_deviation_minute_penalty: float = 0.0
+    requested_time_deviation_ratio_penalty: float = 24.0
 
 
 class GurobiUnavailableError(RuntimeError):
@@ -100,6 +107,9 @@ def rank_routes(
             feasible_candidates.append(candidate)
     if not feasible_candidates:
         return []
+    feasible_candidates = _normalize_spatial_deviation(
+        feasible_candidates, request, weights
+    )
 
     if gp is None:
         if _development_fallback_enabled():
@@ -125,8 +135,9 @@ def optimize_network(
 
     The first objective maximizes completed bakery pickups. The second objective
     maximizes route quality, which rewards pantry priority and penalizes driving,
-    waiting, and distance from a driver's preferred destination. Pantries do not
-    receive a capacity constraint because BakedBoston intentionally allows a
+    proportional requested-window deviation, and distance from a driver's
+    requested start and destination ZIP areas. Pantries do not receive a
+    capacity constraint because BakedBoston intentionally allows a
     pantry to accept multiple deliveries while its receiving window is open.
     """
 
@@ -465,6 +476,7 @@ def _assignment_candidates(
     for request_index, request in enumerate(requests):
         request_id = request.id or f"request-{request_index}"
         driver_id = request.driver_id or request_id
+        request_routes: list[RouteCandidate] = []
         for pickup, pantry in product(pickups, pantries):
             route = _candidate(
                 pickup,
@@ -476,7 +488,9 @@ def _assignment_candidates(
                 dropoff_service_minutes,
             )
             if route is not None:
-                result.append(AssignmentCandidate(
+                request_routes.append(route)
+        for route in _normalize_spatial_deviation(request_routes, request, weights):
+            result.append(AssignmentCandidate(
                     request_id=request_id,
                     driver_id=driver_id,
                     route=route,
@@ -763,13 +777,32 @@ def _candidate(
     def timing_score(item: dict[str, object]) -> float:
         return (
             - weights.drive_minute_penalty * float(item["drive_minutes"])
-            - weights.waiting_minute_penalty * float(item["predeparture_waiting_minutes"])
-            - weights.facility_waiting_minute_penalty * float(item["facility_waiting_minutes"])
-            - weights.destination_minute_penalty * float(item["destination_minutes"])
-            - weights.requested_time_deviation_minute_penalty * float(item["requested_time_deviation_minutes"])
+            - weights.requested_time_deviation_ratio_penalty
+            * float(item["requested_time_deviation_ratio"])
         )
 
-    best = max(timings, key=lambda item: (timing_score(item), -float(item["predeparture_waiting_minutes"])))
+    best = max(
+        timings,
+        key=lambda item: (
+            timing_score(item),
+            -float(item["requested_time_deviation_ratio"]),
+            -float(item["facility_waiting_minutes"]),
+        ),
+    )
+    origin_deviation_miles = _distance_outside_preference_area(
+        pickup.location,
+        request.start_location,
+        request.start_radius_miles,
+    )
+    destination_deviation_miles = (
+        _distance_outside_preference_area(
+            pantry.location,
+            request.preferred_destination,
+            request.destination_radius_miles,
+        )
+        if request.preferred_destination is not None
+        else 0.0
+    )
     score = weights.pantry_priority_reward * pantry.priority_score + timing_score(best)
     return RouteCandidate(
         bakery_id=pickup.id,
@@ -784,18 +817,25 @@ def _candidate(
         finish_at=best["finish_at"],
         drive_minutes=float(best["drive_minutes"]),
         waiting_minutes=float(best["predeparture_waiting_minutes"]),
-        destination_minutes=float(best["destination_minutes"]),
+        destination_minutes=0.0,
         pantry_priority=pantry.priority_score,
         score=score,
         explanation=_explanation(
             pantry.priority_score,
             float(best["drive_minutes"]),
-            float(best["destination_minutes"]),
             float(best["requested_time_deviation_minutes"]),
+            float(best["requested_time_deviation_ratio"]),
+            origin_deviation_miles,
+            destination_deviation_miles,
+            0.0,
         ),
         facility_waiting_minutes=float(best["facility_waiting_minutes"]),
         requested_time_deviation_minutes=float(best["requested_time_deviation_minutes"]),
+        requested_window_minutes=float(best["requested_window_minutes"]),
+        requested_time_deviation_ratio=float(best["requested_time_deviation_ratio"]),
         within_preferred_window=bool(best["within_preferred_window"]),
+        origin_deviation_miles=origin_deviation_miles,
+        destination_deviation_miles=destination_deviation_miles,
     )
 
 
@@ -830,17 +870,14 @@ def _evaluate_timing(
     if finish_at > request.hard_search_end:
         return None
 
-    destination_minutes = 0.0
-    if request.preferred_destination is not None:
-        destination_minutes = travel.duration_minutes(
-            pantry.location,
-            request.preferred_destination,
-            finish_at,
-        )
-
     early_start = max(0.0, (request.preferred_start - depart_at).total_seconds() / 60)
     late_finish = max(0.0, (finish_at - request.preferred_finish).total_seconds() / 60)
     requested_time_deviation = early_start + late_finish
+    requested_window_minutes = max(
+        30.0,
+        (request.preferred_finish - request.preferred_start).total_seconds() / 60,
+    )
+    requested_time_deviation_ratio = requested_time_deviation / requested_window_minutes
     return {
         "depart_at": depart_at,
         "pickup_at": pickup_at,
@@ -849,8 +886,10 @@ def _evaluate_timing(
         "drive_minutes": to_bakery + to_pantry,
         "predeparture_waiting_minutes": (depart_at - request.login_time).total_seconds() / 60,
         "facility_waiting_minutes": waiting_at_bakery + waiting_at_pantry,
-        "destination_minutes": destination_minutes,
+        "destination_minutes": 0.0,
         "requested_time_deviation_minutes": requested_time_deviation,
+        "requested_window_minutes": requested_window_minutes,
+        "requested_time_deviation_ratio": requested_time_deviation_ratio,
         "within_preferred_window": requested_time_deviation <= 0.01,
     }
 
@@ -858,8 +897,11 @@ def _evaluate_timing(
 def _explanation(
     priority: float,
     drive_minutes: float,
-    destination_minutes: float,
     requested_time_deviation_minutes: float,
+    requested_time_deviation_ratio: float,
+    origin_deviation_miles: float,
+    destination_deviation_miles: float,
+    normalized_spatial_deviation: float,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     if requested_time_deviation_minutes <= 0.01:
@@ -868,8 +910,92 @@ def _explanation(
         reasons.append("Serves a higher-priority pantry")
     if drive_minutes <= 30:
         reasons.append("Short total driving time")
-    if destination_minutes and destination_minutes <= 15:
-        reasons.append("Ends close to the preferred destination")
+    if origin_deviation_miles <= 0.01:
+        reasons.append("Bakery is inside the requested starting ZIP area")
+    else:
+        reasons.append(
+            f"Bakery is {origin_deviation_miles:.1f} mi outside the requested starting area"
+        )
+    if destination_deviation_miles <= 0.01:
+        reasons.append("Pantry is inside the requested destination ZIP area")
+    else:
+        reasons.append(
+            f"Pantry is {destination_deviation_miles:.1f} mi outside the requested destination area"
+        )
+    if requested_time_deviation_minutes > 0.01:
+        reasons.append(
+            f"Uses {requested_time_deviation_ratio:.0%} of the requested-window length outside the preferred time"
+        )
     if not reasons:
         reasons.append("Best available balance of feasibility and priority")
     return tuple(reasons)
+
+
+def _distance_outside_preference_area(
+    facility: Location,
+    preference_center: Location,
+    radius_miles: float,
+) -> float:
+    """Shortest straight-line distance from a facility to a preference circle.
+
+    A facility inside the requested ZIP approximation has zero deviation. A
+    facility outside it is measured to the closest point on the circle, not to
+    its center.
+    """
+
+    miles_to_center = _haversine_miles(
+        facility.latitude,
+        facility.longitude,
+        preference_center.latitude,
+        preference_center.longitude,
+    )
+    return max(0.0, miles_to_center - max(0.0, radius_miles))
+
+
+def _normalize_spatial_deviation(
+    routes: list[RouteCandidate],
+    request: DriverRequest,
+    weights: OptimizationWeights,
+) -> list[RouteCandidate]:
+    """Scale spatial misses against the feasible alternatives for one driver.
+
+    Each component is divided by the largest feasible miss for that request.
+    Exact ZIP-area matches therefore remain zero; lower ratios are always
+    preferred, and no route receives a positive bonus for an exact match.
+    """
+
+    if not routes:
+        return []
+    max_origin = max(route.origin_deviation_miles for route in routes)
+    max_destination = max(route.destination_deviation_miles for route in routes)
+    has_destination = request.preferred_destination is not None
+    normalized: list[RouteCandidate] = []
+    for route in routes:
+        origin_ratio = (
+            route.origin_deviation_miles / max_origin if max_origin > 0 else 0.0
+        )
+        destination_ratio = (
+            route.destination_deviation_miles / max_destination
+            if has_destination and max_destination > 0
+            else 0.0
+        )
+        component_count = 2 if has_destination else 1
+        spatial_ratio = (origin_ratio + destination_ratio) / component_count
+        score = route.score - weights.spatial_deviation_ratio_penalty * spatial_ratio
+        normalized.append(replace(
+            route,
+            score=score,
+            normalized_origin_deviation=origin_ratio,
+            normalized_destination_deviation=destination_ratio,
+            normalized_spatial_deviation=spatial_ratio,
+            explanation=_explanation(
+                route.pantry_priority,
+                route.drive_minutes,
+                route.requested_time_deviation_minutes,
+                route.requested_time_deviation_ratio,
+                route.origin_deviation_miles,
+                route.destination_deviation_miles,
+                spatial_ratio,
+            ),
+        ))
+    return normalized

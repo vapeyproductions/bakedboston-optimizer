@@ -69,10 +69,15 @@ class ExperimentConfig:
     acceptance_enabled: bool = True
     acceptance_intercept: float = 2.2
     acceptance_drive_penalty: float = 0.045
-    acceptance_predeparture_wait_penalty: float = 0.006
-    acceptance_facility_wait_penalty: float = 0.040
-    acceptance_requested_time_deviation_penalty: float = 0.050
-    acceptance_destination_penalty: float = 0.035
+    acceptance_predeparture_wait_penalty: float = 0.0
+    acceptance_facility_wait_penalty: float = 0.0
+    acceptance_requested_time_deviation_penalty: float = 0.0
+    acceptance_requested_time_deviation_ratio_penalty: float = 1.8
+    # Compatibility field for older saved configs. Destination travel minutes
+    # are no longer used; spatial fit is measured as a normalized geographic
+    # miss from the requested start/end ZIP areas.
+    acceptance_destination_penalty: float = 0.0
+    acceptance_spatial_deviation_ratio_penalty: float = 1.1
     max_simultaneous_drivers: int = 3
 
     def __post_init__(self) -> None:
@@ -94,7 +99,15 @@ class ExperimentConfig:
                 "acceptance_requested_time_deviation_penalty",
                 self.acceptance_requested_time_deviation_penalty,
             ),
+            (
+                "acceptance_requested_time_deviation_ratio_penalty",
+                self.acceptance_requested_time_deviation_ratio_penalty,
+            ),
             ("acceptance_destination_penalty", self.acceptance_destination_penalty),
+            (
+                "acceptance_spatial_deviation_ratio_penalty",
+                self.acceptance_spatial_deviation_ratio_penalty,
+            ),
         ):
             if value < 0:
                 raise ValueError(f"{name} cannot be negative")
@@ -162,8 +175,15 @@ class ExperimentAssignment:
     waiting_minutes: float
     facility_waiting_minutes: float
     requested_time_deviation_minutes: float
+    requested_window_minutes: float
+    requested_time_deviation_ratio: float
     within_preferred_window: bool
     destination_minutes: float
+    origin_deviation_miles: float
+    destination_deviation_miles: float
+    normalized_origin_deviation: float
+    normalized_destination_deviation: float
+    normalized_spatial_deviation: float
     pantry_priority: float
     route_score: float
     acceptance_probability: float
@@ -188,12 +208,33 @@ class ExperimentAssignment:
             "driveMinutes": round(self.drive_minutes, 3),
             "waitingMinutes": round(self.waiting_minutes, 3),
             "predepartureWaitMinutes": round(self.waiting_minutes, 3),
-            "facilityWaitingMinutes": round(self.facility_waiting_minutes, 3),
             "requestedTimeDeviationMinutes": round(
                 self.requested_time_deviation_minutes, 3
             ),
+            "outsideRequestedWindowMinutes": round(
+                self.requested_time_deviation_minutes, 3
+            ),
+            "requestedWindowMinutes": round(self.requested_window_minutes, 3),
+            "outsideRequestedWindowRatio": round(
+                self.requested_time_deviation_ratio, 4
+            ),
+            "outsideRequestedWindowPercent": round(
+                100 * self.requested_time_deviation_ratio, 2
+            ),
             "withinPreferredWindow": self.within_preferred_window,
             "destinationMinutes": round(self.destination_minutes, 3),
+            "originDeviationMiles": round(self.origin_deviation_miles, 3),
+            "destinationDeviationMiles": round(self.destination_deviation_miles, 3),
+            "normalizedOriginDeviation": round(self.normalized_origin_deviation, 4),
+            "normalizedDestinationDeviation": round(
+                self.normalized_destination_deviation, 4
+            ),
+            "normalizedSpatialDeviation": round(
+                self.normalized_spatial_deviation, 4
+            ),
+            "spatialDeviationPercent": round(
+                100 * self.normalized_spatial_deviation, 2
+            ),
             "pantryPriority": round(self.pantry_priority, 4),
             "routeScore": round(self.route_score, 4),
             "acceptanceProbability": round(self.acceptance_probability, 4),
@@ -221,8 +262,15 @@ class ExperimentCandidate:
     waiting_minutes: float
     facility_waiting_minutes: float
     requested_time_deviation_minutes: float
+    requested_window_minutes: float
+    requested_time_deviation_ratio: float
     within_preferred_window: bool
     destination_minutes: float
+    origin_deviation_miles: float
+    destination_deviation_miles: float
+    normalized_origin_deviation: float
+    normalized_destination_deviation: float
+    normalized_spatial_deviation: float
     pantry_priority: float
     route_score: float
     acceptance_probability: float
@@ -231,6 +279,8 @@ class ExperimentCandidate:
     driver_start: tuple[float, float]
     bakery_location: tuple[float, float]
     pantry_location: tuple[float, float]
+    bakery_postal_code: str
+    pantry_postal_code: str
     recommendation_rank: int | None
     selected: bool
     accepted: bool | None
@@ -250,12 +300,33 @@ class ExperimentCandidate:
             "driveMinutes": round(self.drive_minutes, 3),
             "waitingMinutes": round(self.waiting_minutes, 3),
             "predepartureWaitMinutes": round(self.waiting_minutes, 3),
-            "facilityWaitingMinutes": round(self.facility_waiting_minutes, 3),
             "requestedTimeDeviationMinutes": round(
                 self.requested_time_deviation_minutes, 3
             ),
+            "outsideRequestedWindowMinutes": round(
+                self.requested_time_deviation_minutes, 3
+            ),
+            "requestedWindowMinutes": round(self.requested_window_minutes, 3),
+            "outsideRequestedWindowRatio": round(
+                self.requested_time_deviation_ratio, 4
+            ),
+            "outsideRequestedWindowPercent": round(
+                100 * self.requested_time_deviation_ratio, 2
+            ),
             "withinPreferredWindow": self.within_preferred_window,
             "destinationMinutes": round(self.destination_minutes, 3),
+            "originDeviationMiles": round(self.origin_deviation_miles, 3),
+            "destinationDeviationMiles": round(self.destination_deviation_miles, 3),
+            "normalizedOriginDeviation": round(self.normalized_origin_deviation, 4),
+            "normalizedDestinationDeviation": round(
+                self.normalized_destination_deviation, 4
+            ),
+            "normalizedSpatialDeviation": round(
+                self.normalized_spatial_deviation, 4
+            ),
+            "spatialDeviationPercent": round(
+                100 * self.normalized_spatial_deviation, 2
+            ),
             "pantryPriority": round(self.pantry_priority, 4),
             "routeScore": round(self.route_score, 4),
             "acceptanceProbability": round(self.acceptance_probability, 4),
@@ -264,6 +335,8 @@ class ExperimentCandidate:
             "driverStart": _coordinate_dict(self.driver_start),
             "bakeryLocation": _coordinate_dict(self.bakery_location),
             "pantryLocation": _coordinate_dict(self.pantry_location),
+            "bakeryPostalCode": self.bakery_postal_code,
+            "pantryPostalCode": self.pantry_postal_code,
             "recommended": self.recommendation_rank is not None,
             "recommendationRank": self.recommendation_rank,
             "selected": self.selected,
@@ -308,19 +381,45 @@ class DecisionEpochResult:
                     "loggedAt": request.login_time.isoformat(),
                     "preferredStart": request.preferred_start.isoformat(),
                     "preferredFinish": request.preferred_finish.isoformat(),
+                    "requestedWindowMinutes": round(
+                        (request.preferred_finish - request.preferred_start).total_seconds() / 60,
+                        3,
+                    ),
                     "searchUntil": request.hard_search_end.isoformat(),
                     "earliestStart": request.earliest_start.isoformat(),
                     "latestFinish": request.latest_finish.isoformat(),
                     "hasPreferredDestination": request.preferred_destination is not None,
                     "startLocation": {
+                        "formattedAddress": request.start_location.formatted_address,
                         "latitude": request.start_location.latitude,
                         "longitude": request.start_location.longitude,
+                        "postalCode": (
+                            request.start_location.postal_code
+                            or request.start_zip_code
+                        ),
                     },
+                    "startZipCode": (
+                        request.start_zip_code or request.start_location.postal_code
+                    ),
+                    "startRadiusMiles": request.start_radius_miles,
                     "preferredDestination": (
                         {
+                            "formattedAddress": (
+                                request.preferred_destination.formatted_address
+                            ),
                             "latitude": request.preferred_destination.latitude,
                             "longitude": request.preferred_destination.longitude,
+                            "postalCode": (
+                                request.preferred_destination.postal_code
+                                or request.destination_zip_code
+                            ),
                         }
+                        if request.preferred_destination is not None
+                        else None
+                    ),
+                    "destinationZipCode": request.destination_zip_code,
+                    "destinationRadiusMiles": (
+                        request.destination_radius_miles
                         if request.preferred_destination is not None
                         else None
                     ),
@@ -453,17 +552,32 @@ class PolicyReport:
             "averagePredepartureWaitMinutes": _mean(
                 item.waiting_minutes for item in completed
             ),
-            "averageFacilityWaitingMinutes": _mean(
-                item.facility_waiting_minutes for item in completed
-            ),
             "averageRequestedTimeDeviationMinutes": _mean(
                 item.requested_time_deviation_minutes for item in completed
+            ),
+            "averageOutsideRequestedWindowRatio": _mean(
+                (item.requested_time_deviation_ratio for item in completed),
+                digits=4,
+            ),
+            "averageOutsideRequestedWindowPercent": _mean(
+                (100 * item.requested_time_deviation_ratio for item in completed),
+                digits=2,
             ),
             "preferredWindowFitRate": _ratio(
                 sum(item.within_preferred_window for item in completed),
                 len(completed),
             ),
             "averageDestinationMinutes": _mean(item.destination_minutes for item in completed),
+            "averageOriginDeviationMiles": _mean(
+                item.origin_deviation_miles for item in completed
+            ),
+            "averageDestinationDeviationMiles": _mean(
+                item.destination_deviation_miles for item in completed
+            ),
+            "averageNormalizedSpatialDeviation": _mean(
+                (item.normalized_spatial_deviation for item in completed),
+                digits=4,
+            ),
             "averageTotalTripDurationMinutes": _mean(
                 item.total_trip_minutes for item in completed
             ),
@@ -575,6 +689,20 @@ def build_scenario(
             simulation.staffed_pantry_open_probability,
             rng,
         )
+        pickups = [
+            replace(
+                pickup,
+                location=_location_with_estimated_zip(pickup.location),
+            )
+            for pickup in pickups
+        ]
+        pantries = [
+            replace(
+                pantry,
+                location=_location_with_estimated_zip(pantry.location),
+            )
+            for pantry in pantries
+        ]
         requests = _rolling_driver_requests(
             pickups,
             pantries,
@@ -852,12 +980,10 @@ def acceptance_probability(
     logit = (
         config.acceptance_intercept
         - config.acceptance_drive_penalty * route.drive_minutes
-        - config.acceptance_predeparture_wait_penalty * route.waiting_minutes
-        - config.acceptance_facility_wait_penalty
-        * route.facility_waiting_minutes
-        - config.acceptance_requested_time_deviation_penalty
-        * route.requested_time_deviation_minutes
-        - config.acceptance_destination_penalty * route.destination_minutes
+        - config.acceptance_requested_time_deviation_ratio_penalty
+        * route.requested_time_deviation_ratio
+        - config.acceptance_spatial_deviation_ratio_penalty
+        * route.normalized_spatial_deviation
     )
     return min(0.98, max(0.02, 1.0 / (1.0 + math.exp(-logit))))
 
@@ -890,7 +1016,6 @@ SUMMARY_CSV_FIELDS: tuple[str, ...] = (
     "averageDistanceMiles",
     "averageWaitingMinutes",
     "averagePredepartureWaitMinutes",
-    "averageFacilityWaitingMinutes",
     "averageRequestedTimeDeviationMinutes",
     "preferredWindowFitRate",
     "averageTotalTripDurationMinutes",
@@ -994,27 +1119,39 @@ def _rolling_driver_requests(
                     minutes=rng.choice((30, 45, 60, 75, 90, 120))
                 )
             preferred_finish = preferred_start + timedelta(
-                minutes=rng.choice((60, 90, 120))
+                minutes=rng.choice((30, 45, 60, 90, 120, 180, 240))
             )
             search_until = preferred_finish + timedelta(
                 minutes=rng.choice((45, 60, 90))
             )
+            start_latitude = center_latitude + rng.uniform(-0.025, 0.025)
+            start_longitude = center_longitude + rng.uniform(-0.035, 0.035)
+            start_zip_code = _nearest_zip_code(start_latitude, start_longitude)
             start = Location(
                 address_entered=f"synthetic-driver-{request_index}-origin",
-                formatted_address="Synthetic Boston-area origin",
-                latitude=center_latitude + rng.uniform(-0.025, 0.025),
-                longitude=center_longitude + rng.uniform(-0.035, 0.035),
+                formatted_address=f"Estimated center of ZIP {start_zip_code}",
+                latitude=start_latitude,
+                longitude=start_longitude,
                 validation_status=AddressValidationStatus.VALIDATED,
+                postal_code=start_zip_code,
             )
             preferred: Location | None = None
+            destination_zip_code = ""
             if rng.random() < 0.65:
                 anchor = rng.choice(pantries).location
+                preferred_latitude = anchor.latitude + rng.uniform(-0.01, 0.01)
+                preferred_longitude = anchor.longitude + rng.uniform(-0.01, 0.01)
+                destination_zip_code = _nearest_zip_code(
+                    preferred_latitude,
+                    preferred_longitude,
+                )
                 preferred = Location(
                     address_entered=f"synthetic-driver-{request_index}-destination",
-                    formatted_address="Synthetic preferred destination",
-                    latitude=anchor.latitude + rng.uniform(-0.01, 0.01),
-                    longitude=anchor.longitude + rng.uniform(-0.01, 0.01),
+                    formatted_address=f"Estimated center of ZIP {destination_zip_code}",
+                    latitude=preferred_latitude,
+                    longitude=preferred_longitude,
                     validation_status=AddressValidationStatus.VALIDATED,
+                    postal_code=destination_zip_code,
                 )
             requests.append(DriverRequest(
                 id=f"request-{logged_at.date().isoformat()}-{request_index}",
@@ -1025,6 +1162,8 @@ def _rolling_driver_requests(
                 preferred_destination=preferred,
                 logged_at=logged_at,
                 search_until=search_until,
+                start_zip_code=start_zip_code,
+                destination_zip_code=destination_zip_code,
             ))
     return sorted(requests, key=lambda item: (item.login_time, item.id))
 
@@ -1096,7 +1235,7 @@ def _policy_sort_key(
         )
     if policy == RoutingPolicy.SHORTEST_ROUTE:
         return lambda item: (
-            item.route.drive_minutes + item.route.facility_waiting_minutes,
+            item.route.drive_minutes,
             item.route.finish_at,
             -item.route.score,
         )
@@ -1114,9 +1253,9 @@ def _policy_sort_key(
         )
     if policy == RoutingPolicy.DRIVER_FIT:
         return lambda item: (
-            item.route.requested_time_deviation_minutes,
-            item.route.destination_minutes,
-            item.route.drive_minutes + item.route.facility_waiting_minutes,
+            item.route.requested_time_deviation_ratio,
+            item.route.normalized_spatial_deviation,
+            item.route.drive_minutes,
             item.route.finish_at,
         )
     raise ValueError(f"Unsupported routing policy: {policy}")
@@ -1174,8 +1313,15 @@ def _experiment_assignment(
         requested_time_deviation_minutes=(
             route.requested_time_deviation_minutes
         ),
+        requested_window_minutes=route.requested_window_minutes,
+        requested_time_deviation_ratio=route.requested_time_deviation_ratio,
         within_preferred_window=route.within_preferred_window,
         destination_minutes=route.destination_minutes,
+        origin_deviation_miles=route.origin_deviation_miles,
+        destination_deviation_miles=route.destination_deviation_miles,
+        normalized_origin_deviation=route.normalized_origin_deviation,
+        normalized_destination_deviation=route.normalized_destination_deviation,
+        normalized_spatial_deviation=route.normalized_spatial_deviation,
         pantry_priority=route.pantry_priority,
         route_score=route.score,
         acceptance_probability=probability,
@@ -1224,8 +1370,15 @@ def _experiment_candidate(
         requested_time_deviation_minutes=(
             route.requested_time_deviation_minutes
         ),
+        requested_window_minutes=route.requested_window_minutes,
+        requested_time_deviation_ratio=route.requested_time_deviation_ratio,
         within_preferred_window=route.within_preferred_window,
         destination_minutes=route.destination_minutes,
+        origin_deviation_miles=route.origin_deviation_miles,
+        destination_deviation_miles=route.destination_deviation_miles,
+        normalized_origin_deviation=route.normalized_origin_deviation,
+        normalized_destination_deviation=route.normalized_destination_deviation,
+        normalized_spatial_deviation=route.normalized_spatial_deviation,
         pantry_priority=route.pantry_priority,
         route_score=route.score,
         acceptance_probability=probability,
@@ -1239,9 +1392,60 @@ def _experiment_candidate(
         ),
         bakery_location=(pickup.location.latitude, pickup.location.longitude),
         pantry_location=(pantry.location.latitude, pantry.location.longitude),
+        bakery_postal_code=pickup.location.postal_code,
+        pantry_postal_code=pantry.location.postal_code,
         recommendation_rank=recommendation_rank,
         selected=selected,
         accepted=accepted,
+    )
+
+
+_BOSTON_ZIP_CENTERS: tuple[tuple[str, float, float], ...] = (
+    ("02108", 42.3570, -71.0640),
+    ("02114", 42.3611, -71.0680),
+    ("02115", 42.3429, -71.0920),
+    ("02118", 42.3387, -71.0726),
+    ("02119", 42.3251, -71.0857),
+    ("02120", 42.3328, -71.0971),
+    ("02130", 42.3097, -71.1147),
+    ("02134", 42.3533, -71.1329),
+    ("02135", 42.3484, -71.1535),
+    ("02139", 42.3647, -71.1042),
+    ("02143", 42.3810, -71.0974),
+    ("02458", 42.3543, -71.1886),
+    ("02459", 42.3152, -71.1900),
+)
+
+
+def _nearest_zip_code(latitude: float, longitude: float) -> str:
+    """Return the nearest representative Boston-area ZIP centroid."""
+
+    return min(
+        _BOSTON_ZIP_CENTERS,
+        key=lambda item: (
+            (latitude - item[1]) ** 2
+            + ((longitude - item[2]) * math.cos(math.radians(latitude))) ** 2
+        ),
+    )[0]
+
+
+def estimated_postal_code(location: Location) -> str:
+    """Return a supplied ZIP or estimate one from a Boston-area centroid."""
+
+    return location.postal_code or _nearest_zip_code(
+        location.latitude,
+        location.longitude,
+    )
+
+
+def _location_with_estimated_zip(location: Location) -> Location:
+    """Fill missing facility ZIPs from the nearest Boston-area centroid."""
+
+    if location.postal_code:
+        return location
+    return replace(
+        location,
+        postal_code=estimated_postal_code(location),
     )
 
 
@@ -1469,7 +1673,6 @@ def _aggregate_metrics(values: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "averageDistanceMiles",
         "averageWaitingMinutes",
         "averagePredepartureWaitMinutes",
-        "averageFacilityWaitingMinutes",
         "averageRequestedTimeDeviationMinutes",
         "preferredWindowFitRate",
         "averageTotalTripDurationMinutes",

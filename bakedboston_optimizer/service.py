@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -25,6 +26,8 @@ def recommend(payload: dict[str, Any]) -> dict[str, Any]:
     preferred_finish = _datetime(payload["latestFinish"])
     if preferred_finish <= preferred_start:
         raise ValueError("latestFinish must be after earliestStart")
+    if preferred_finish - preferred_start < timedelta(minutes=30):
+        raise ValueError("Requested delivery windows must be at least 30 minutes")
     logged_at = _datetime(payload.get("loggedAt") or payload["earliestStart"])
     search_until = _datetime(payload["searchUntil"]) if payload.get("searchUntil") else preferred_finish + timedelta(minutes=90)
     if search_until <= logged_at:
@@ -42,6 +45,14 @@ def recommend(payload: dict[str, Any]) -> dict[str, Any]:
         preferred_destination=preferred,
         logged_at=logged_at,
         search_until=search_until,
+        start_radius_miles=float(payload.get("startRadiusMiles") or 2.0),
+        destination_radius_miles=float(payload.get("destinationRadiusMiles") or 2.0),
+        start_zip_code=str(payload.get("startZipCode") or start.postal_code or ""),
+        destination_zip_code=str(
+            payload.get("destinationZipCode")
+            or (preferred.postal_code if preferred is not None else "")
+            or ""
+        ),
     )
     routes = rank_routes(
         pickups,
@@ -114,7 +125,7 @@ def recommend_network(payload: dict[str, Any]) -> dict[str, Any]:
             continue
         preferred_start = _datetime(item["earliestStart"])
         preferred_finish = _datetime(item["latestFinish"])
-        if preferred_finish <= preferred_start:
+        if preferred_finish - preferred_start < timedelta(minutes=30):
             continue
         logged_at = _datetime(item.get("loggedAt") or item.get("createdAt") or item["earliestStart"])
         search_until = _datetime(item["searchUntil"]) if item.get("searchUntil") else preferred_finish + timedelta(minutes=90)
@@ -129,6 +140,14 @@ def recommend_network(payload: dict[str, Any]) -> dict[str, Any]:
             preferred_destination=preferred_destination,
             logged_at=logged_at,
             search_until=search_until,
+            start_radius_miles=float(item.get("startRadiusMiles") or 2.0),
+            destination_radius_miles=float(item.get("destinationRadiusMiles") or 2.0),
+            start_zip_code=str(item.get("startZip") or start.postal_code or ""),
+            destination_zip_code=str(
+                item.get("endZip")
+                or (preferred_destination.postal_code if preferred_destination else "")
+                or ""
+            ),
         ))
 
     if not requests:
@@ -247,7 +266,8 @@ def simulate_custom_experiment(payload: dict[str, Any]) -> dict[str, Any]:
     five benchmark policies.
     """
 
-    days = _bounded_int(payload.get("days", 5), "days", 3, 5)
+    # Public and saved academic comparisons use one consistent five-day horizon.
+    days = 5
     drivers_per_day = _bounded_int(
         payload.get("driversPerDay", 6), "driversPerDay", 1, 12
     )
@@ -323,6 +343,36 @@ def _request_payload(request: DriverRequest) -> dict[str, Any]:
         "preferredStart": request.preferred_start.isoformat(),
         "preferredFinish": request.preferred_finish.isoformat(),
         "searchUntil": request.hard_search_end.isoformat(),
+        "requestedWindowMinutes": (
+            request.preferred_finish - request.preferred_start
+        ).total_seconds() / 60,
+        "startLocation": {
+            "formattedAddress": request.start_location.formatted_address,
+            "latitude": request.start_location.latitude,
+            "longitude": request.start_location.longitude,
+            "postalCode": request.start_location.postal_code or request.start_zip_code,
+        },
+        "startZipCode": request.start_zip_code or request.start_location.postal_code,
+        "startRadiusMiles": request.start_radius_miles,
+        "preferredDestination": (
+            {
+                "formattedAddress": request.preferred_destination.formatted_address,
+                "latitude": request.preferred_destination.latitude,
+                "longitude": request.preferred_destination.longitude,
+                "postalCode": (
+                    request.preferred_destination.postal_code
+                    or request.destination_zip_code
+                ),
+            }
+            if request.preferred_destination is not None
+            else None
+        ),
+        "destinationZipCode": request.destination_zip_code,
+        "destinationRadiusMiles": (
+            request.destination_radius_miles
+            if request.preferred_destination is not None
+            else None
+        ),
     }
 
 
@@ -347,7 +397,17 @@ def _route_payload(snapshot: NetworkSnapshot, route: Any) -> dict[str, Any]:
         "predepartureWaitMinutes": route.waiting_minutes,
         "facilityWaitMinutes": route.facility_waiting_minutes,
         "requestedTimeDeviationMinutes": route.requested_time_deviation_minutes,
+        "outsideRequestedWindowMinutes": route.requested_time_deviation_minutes,
+        "requestedWindowMinutes": route.requested_window_minutes,
+        "outsideRequestedWindowRatio": route.requested_time_deviation_ratio,
+        "outsideRequestedWindowPercent": 100 * route.requested_time_deviation_ratio,
         "withinPreferredWindow": route.within_preferred_window,
+        "originDeviationMiles": route.origin_deviation_miles,
+        "destinationDeviationMiles": route.destination_deviation_miles,
+        "normalizedOriginDeviation": route.normalized_origin_deviation,
+        "normalizedDestinationDeviation": route.normalized_destination_deviation,
+        "normalizedSpatialDeviation": route.normalized_spatial_deviation,
+        "spatialDeviationPercent": 100 * route.normalized_spatial_deviation,
         "pantryPriority": route.pantry_priority,
         "score": route.score,
         "explanation": list(route.explanation),
@@ -541,12 +601,15 @@ def _datetime(value: str) -> datetime:
 
 
 def _location(identifier: str, value: dict[str, Any]) -> Location:
+    address = str(value.get("formattedAddress") or value.get("address") or identifier)
+    postal_match = re.search(r"\b\d{5}(?:-\d{4})?\b", address)
     return Location(
-        address_entered=str(value.get("address") or identifier),
-        formatted_address=str(value.get("address") or identifier),
+        address_entered=str(value.get("address") or address),
+        formatted_address=address,
         latitude=float(value["latitude"]),
         longitude=float(value["longitude"]),
         validation_status=AddressValidationStatus.VALIDATED,
+        postal_code=str(value.get("postalCode") or (postal_match.group(0) if postal_match else "")),
     )
 
 

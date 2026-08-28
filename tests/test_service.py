@@ -86,7 +86,7 @@ class ServiceFeasibilityTests(unittest.TestCase):
 
 class CustomExperimentTests(unittest.TestCase):
     @patch("bakedboston_optimizer.service.build_web_payload")
-    def test_custom_experiment_samples_requested_network_and_preserves_controls(self, mocked_build) -> None:
+    def test_custom_experiment_samples_network_and_enforces_five_day_horizon(self, mocked_build) -> None:
         mocked_build.return_value = {
             "scenario": {},
             "runtime": {"solverBackend": "gurobi"},
@@ -104,7 +104,7 @@ class CustomExperimentTests(unittest.TestCase):
         sampled_snapshot = mocked_build.call_args.args[0]
         self.assertEqual(len(sampled_snapshot.eligible_bakeries), 4)
         self.assertEqual(len(sampled_snapshot.eligible_pantries), 3)
-        self.assertEqual(mocked_build.call_args.kwargs["days"], 4)
+        self.assertEqual(mocked_build.call_args.kwargs["days"], 5)
         self.assertEqual(mocked_build.call_args.kwargs["drivers_per_day"], 5)
         self.assertEqual(mocked_build.call_args.kwargs["seed"], 77)
         self.assertEqual(mocked_build.call_args.kwargs["max_simultaneous_drivers"], 2)

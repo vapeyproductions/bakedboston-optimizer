@@ -7,7 +7,12 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from .experiment import DEFAULT_POLICIES, ExperimentConfig, compare_policies
+from .experiment import (
+    DEFAULT_POLICIES,
+    ExperimentConfig,
+    compare_policies,
+    estimated_postal_code,
+)
 from .network import NetworkSnapshot, parse_snapshot
 from .optimizer import OptimizationWeights
 from .simulation import SimulationConfig
@@ -25,7 +30,7 @@ POLICY_METADATA = {
     },
     "shortest_route": {
         "label": "Shortest route",
-        "description": "Greedily chooses the smallest drive-plus-wait burden.",
+        "description": "Greedily chooses the smallest driving-time burden.",
     },
     "earliest_deadline": {
         "label": "Earliest deadline",
@@ -44,12 +49,15 @@ POLICY_METADATA = {
 
 def _network_payload(snapshot: NetworkSnapshot) -> dict[str, Any]:
     def organization(item: Any, kind: str) -> dict[str, Any]:
+        location = item.location()
         return {
             "id": f"{kind}-{item.id}",
             "name": item.name,
             "kind": kind,
             "latitude": item.latitude,
             "longitude": item.longitude,
+            "postalCode": estimated_postal_code(location),
+            "formattedAddress": location.formatted_address,
         }
 
     return {
@@ -160,7 +168,11 @@ def build_web_payload(
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "sourceSnapshotGeneratedAt": snapshot.generated_at.isoformat(),
         "policyMetadata": POLICY_METADATA,
-        "objectiveWeights": asdict(weights),
+        "objectiveWeights": {
+            key: value
+            for key, value in asdict(weights).items()
+            if value != 0
+        },
         "network": _network_payload(snapshot),
         "selectionRule": (
             "The joint Gurobi solve first maximizes the number of simultaneous drivers who receive "

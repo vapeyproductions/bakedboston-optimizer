@@ -21,6 +21,7 @@ class Location:
     longitude: float
     google_place_id: str = ""
     validation_status: AddressValidationStatus = AddressValidationStatus.UNVALIDATED
+    postal_code: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,17 @@ class DriverRequest:
     driver_id: str = ""
     logged_at: datetime | None = None
     search_until: datetime | None = None
+    start_radius_miles: float = 2.0
+    destination_radius_miles: float = 2.0
+    start_zip_code: str = ""
+    destination_zip_code: str = ""
+
+    def __post_init__(self) -> None:
+        requested_minutes = (self.latest_finish - self.earliest_start).total_seconds() / 60
+        if requested_minutes < 30:
+            raise ValueError("Driver requested time windows must be at least 30 minutes")
+        if self.start_radius_miles < 0 or self.destination_radius_miles < 0:
+            raise ValueError("ZIP preference radii cannot be negative")
 
     @property
     def login_time(self) -> datetime:
@@ -107,7 +119,14 @@ class RouteCandidate:
     explanation: tuple[str, ...]
     facility_waiting_minutes: float = 0.0
     requested_time_deviation_minutes: float = 0.0
+    requested_window_minutes: float = 30.0
+    requested_time_deviation_ratio: float = 0.0
     within_preferred_window: bool = True
+    origin_deviation_miles: float = 0.0
+    destination_deviation_miles: float = 0.0
+    normalized_origin_deviation: float = 0.0
+    normalized_destination_deviation: float = 0.0
+    normalized_spatial_deviation: float = 0.0
 
 
 @dataclass(frozen=True)

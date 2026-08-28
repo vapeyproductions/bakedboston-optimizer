@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -47,10 +48,18 @@ class OrganizationRecord:
                 longitude=self.longitude,
                 google_place_id=self.google_place_id,
                 validation_status=status,
+                postal_code=_postal_code(self.formatted_address or self.address),
             )
         if google is None:
             raise ValueError(f"{self.name} needs geocoding before it can be optimized")
         return google.validate_address(self.address)
+
+
+def _postal_code(value: str) -> str:
+    """Extract a five-digit US ZIP code from a validated address."""
+
+    match = re.search(r"\b(\d{5})(?:-\d{4})?\b", value)
+    return match.group(1) if match else ""
 
 
 @dataclass(frozen=True)

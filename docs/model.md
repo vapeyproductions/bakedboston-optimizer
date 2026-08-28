@@ -78,9 +78,10 @@ preferred finish, but each minute of deviation lowers its score. This avoids
 returning no options when a useful route narrowly misses a volunteer's stated
 preference.
 
-An optional starting ZIP replaces the profile origin for that request. An
-optional ending ZIP is a soft destination preference: the route is penalized
-according to the travel time from the pantry to that ZIP after drop-off.
+An optional starting ZIP replaces the profile origin for that request. Starting
+and ending ZIP codes are soft spatial preferences represented by estimated
+circular areas. A route is penalized only for its shortest straight-line miss
+outside those areas; an exact match has zero deviation and receives no bonus.
 
 ## Candidate quality
 
@@ -90,24 +91,54 @@ For feasible assignment \((d,b,p)\):
 quality_{d,b,p} =
 45 \cdot priority_p
 - driveMinutes_{d,b,p}
-- 0.06 \cdot originWaitMinutes_{d,b,p}
-- 0.80 \cdot facilityWaitMinutes_{d,b,p}
-- 0.85 \cdot timeDeviationMinutes_{d,b,p}
-- 0.65 \cdot destinationMinutes_{d,b,p}
+- 24 \cdot outsideWindowRatio_{d,b,p}
+- 18 \cdot spatialDeviationRatio_{d,b,p}
 \]
 
 where:
 
-- `originWaitMinutes` is the interval from login to the optimized departure;
-- `facilityWaitMinutes` is unavoidable waiting after reaching a bakery or pantry;
-- `timeDeviationMinutes` is minutes departing before the preferred start plus
-  minutes finishing after the preferred finish; and
-- `destinationMinutes` measures the post-drop-off drive to the requested ending ZIP.
+- `outsideWindowRatio` is the route's minutes outside the requested interval,
+  divided by the length of that interval; and
+- `spatialDeviationRatio` compares the bakery's miss from the requested
+  starting ZIP area and the pantry's miss from the requested ending ZIP area
+  with the corresponding misses of every other feasible route for that driver.
 
-Waiting safely at the driver's origin receives a small penalty, so the model
-can recommend a good later route without pretending the driver departs at
-login. Waiting after arrival receives a larger penalty because it is more
-burdensome. Requested-interval deviation is penalized more strongly still.
+More precisely:
+
+\[
+outsideMinutes = \max(0, requestedStart-departure)
++ \max(0, finish-requestedFinish)
+\]
+
+\[
+outsideWindowRatio = \frac{outsideMinutes}{requestedWindowMinutes}
+\]
+
+The request interval must be at least 30 minutes. Waiting between login and a
+planned later departure is displayed to the driver but does not reduce route
+quality. The generator schedules departure as late as feasibility permits, so
+avoidable facility waiting is removed rather than priced into the objective.
+For example, a 30-minute miss against a 30-minute request has ratio 1.0 and a
+24-point penalty; a 10-minute miss against a four-hour request has ratio
+10/240 and only a 1-point penalty.
+
+For route \(r=(d,b,p)\), define the raw spatial misses:
+
+\[
+\delta^{start}_r = \max\{0,\ distance(b,startZIP_d)-radius^{start}_d\}
+\]
+
+\[
+\delta^{end}_r = \max\{0,\ distance(p,endZIP_d)-radius^{end}_d\}
+\]
+
+The distance is measured to the closest edge of the estimated ZIP circle, so a
+facility inside the area has a zero-mile miss. For each driver request, each
+applicable miss is divided by the largest miss of that type among the driver's
+feasible routes. The final `spatialDeviationRatio` is the mean of the available
+normalized components. If every alternative has zero deviation for one
+component, that component contributes zero. This creates a relative penalty in
+\([0,1]\), favors the closest alternatives, and never rewards an exact match.
 
 The weights are centralized in `OptimizationWeights` so they can be tested and tuned without changing the constraints.
 
