@@ -28,9 +28,11 @@ from .models import (
 from .network import NetworkSnapshot
 from .optimizer import (
     OptimizationWeights,
+    ParticipationModel,
     active_solver_backend,
     allocate_recommendation_layer,
     enumerate_assignment_candidates,
+    estimate_acceptance_probability,
     optimize_assignment_candidates,
     solver_version,
 )
@@ -189,6 +191,12 @@ class ExperimentAssignment:
     acceptance_probability: float
     distance_miles: float
     total_trip_minutes: float
+    estimated_food_kg: float
+    usable_food_kg: float
+    avoided_system_kg_co2e: float
+    transport_kg_co2e: float
+    residual_waste_kg_co2e: float
+    net_environmental_benefit_kg_co2e: float
     accepted: bool
 
     def as_dict(self) -> dict[str, Any]:
@@ -240,6 +248,14 @@ class ExperimentAssignment:
             "acceptanceProbability": round(self.acceptance_probability, 4),
             "distanceMiles": round(self.distance_miles, 3),
             "totalTripMinutes": round(self.total_trip_minutes, 3),
+            "estimatedFoodKg": round(self.estimated_food_kg, 3),
+            "usableFoodKg": round(self.usable_food_kg, 3),
+            "avoidedSystemKgCO2e": round(self.avoided_system_kg_co2e, 3),
+            "transportKgCO2e": round(self.transport_kg_co2e, 3),
+            "residualWasteKgCO2e": round(self.residual_waste_kg_co2e, 3),
+            "netEnvironmentalBenefitKgCO2e": round(
+                self.net_environmental_benefit_kg_co2e, 3
+            ),
             "accepted": self.accepted,
         }
 
@@ -276,6 +292,12 @@ class ExperimentCandidate:
     acceptance_probability: float
     distance_miles: float
     total_trip_minutes: float
+    estimated_food_kg: float
+    usable_food_kg: float
+    avoided_system_kg_co2e: float
+    transport_kg_co2e: float
+    residual_waste_kg_co2e: float
+    net_environmental_benefit_kg_co2e: float
     driver_start: tuple[float, float]
     bakery_location: tuple[float, float]
     pantry_location: tuple[float, float]
@@ -332,6 +354,14 @@ class ExperimentCandidate:
             "acceptanceProbability": round(self.acceptance_probability, 4),
             "distanceMiles": round(self.distance_miles, 3),
             "totalTripMinutes": round(self.total_trip_minutes, 3),
+            "estimatedFoodKg": round(self.estimated_food_kg, 3),
+            "usableFoodKg": round(self.usable_food_kg, 3),
+            "avoidedSystemKgCO2e": round(self.avoided_system_kg_co2e, 3),
+            "transportKgCO2e": round(self.transport_kg_co2e, 3),
+            "residualWasteKgCO2e": round(self.residual_waste_kg_co2e, 3),
+            "netEnvironmentalBenefitKgCO2e": round(
+                self.net_environmental_benefit_kg_co2e, 3
+            ),
             "driverStart": _coordinate_dict(self.driver_start),
             "bakeryLocation": _coordinate_dict(self.bakery_location),
             "pantryLocation": _coordinate_dict(self.pantry_location),
@@ -513,6 +543,18 @@ class PolicyReport:
         expected_acceptances = sum(item.acceptance_probability for item in offers)
         likely_rejections = sum(item.acceptance_probability < 0.5 for item in offers)
         total_route_quality = sum(item.route_score for item in completed)
+        estimated_food_kg = sum(item.estimated_food_kg for item in completed)
+        usable_food_kg = sum(item.usable_food_kg for item in completed)
+        avoided_system_kg_co2e = sum(
+            item.avoided_system_kg_co2e for item in completed
+        )
+        transport_kg_co2e = sum(item.transport_kg_co2e for item in completed)
+        residual_waste_kg_co2e = sum(
+            item.residual_waste_kg_co2e for item in completed
+        )
+        net_environmental_benefit_kg_co2e = sum(
+            item.net_environmental_benefit_kg_co2e for item in completed
+        )
         return {
             "scheduledPickupWindows": sum(day.scheduled_pickup_windows for day in self.days),
             "eligibleBakeryPickupOccurrences": food_pickups,
@@ -548,7 +590,6 @@ class PolicyReport:
             "pantryServiceGap": service_gap,
             "averageDriveMinutes": _mean(item.drive_minutes for item in completed),
             "averageDistanceMiles": _mean(item.distance_miles for item in completed),
-            "averageWaitingMinutes": _mean(item.waiting_minutes for item in completed),
             "averagePredepartureWaitMinutes": _mean(
                 item.waiting_minutes for item in completed
             ),
@@ -583,6 +624,18 @@ class PolicyReport:
             ),
             "averageRouteBurdenMinutes": _mean(
                 item.total_trip_minutes for item in completed
+            ),
+            "estimatedFoodKgRedistributed": round(estimated_food_kg, 3),
+            "usableFoodKgDelivered": round(usable_food_kg, 3),
+            "avoidedSystemKgCO2e": round(avoided_system_kg_co2e, 3),
+            "transportKgCO2e": round(transport_kg_co2e, 3),
+            "residualWasteKgCO2e": round(residual_waste_kg_co2e, 3),
+            "netEnvironmentalBenefitKgCO2e": round(
+                net_environmental_benefit_kg_co2e, 3
+            ),
+            "averageNetEnvironmentalBenefitKgCO2ePerDelivery": _mean(
+                (item.net_environmental_benefit_kg_co2e for item in completed),
+                digits=3,
             ),
             "averageElapsedFromLoginMinutes": _mean(
                 item.waiting_minutes + item.total_trip_minutes
@@ -777,6 +830,20 @@ def run_policy(
                 provider,
                 weights=weights,
             )
+            participation_model = _participation_model(scenario.config)
+            candidates = [
+                replace(
+                    candidate,
+                    route=replace(
+                        candidate.route,
+                        acceptance_probability=estimate_acceptance_probability(
+                            candidate.route,
+                            participation_model,
+                        ),
+                    ),
+                )
+                for candidate in candidates
+            ]
             candidate_count += len(candidates)
             selected, diagnostic = _select_assignments(
                 policy,
@@ -919,7 +986,7 @@ def compare_policies(
 def compare_horizons(
     snapshot: NetworkSnapshot,
     start_date: date,
-    horizons: Sequence[int] = (3, 4, 5),
+    horizons: Sequence[int] = (5,),
     seeds: Sequence[int] = (2026,),
     policies: Sequence[RoutingPolicy] = DEFAULT_POLICIES,
     drivers_per_day: int = 8,
@@ -931,7 +998,7 @@ def compare_horizons(
     travel: TravelTimeProvider | None = None,
     weights: OptimizationWeights = OptimizationWeights(),
 ) -> HorizonComparisonReport:
-    """Run reproducible 3/4/5-day experiments over identical policy inputs."""
+    """Run reproducible five-day experiments over identical policy inputs."""
 
     normalized_horizons = tuple(int(item) for item in horizons)
     normalized_seeds = tuple(int(item) for item in seeds)
@@ -976,16 +1043,25 @@ def acceptance_probability(
 ) -> float:
     """Transparent synthetic driver behavior; this is not a learned model."""
 
-    route = candidate.route
-    logit = (
-        config.acceptance_intercept
-        - config.acceptance_drive_penalty * route.drive_minutes
-        - config.acceptance_requested_time_deviation_ratio_penalty
-        * route.requested_time_deviation_ratio
-        - config.acceptance_spatial_deviation_ratio_penalty
-        * route.normalized_spatial_deviation
+    return estimate_acceptance_probability(
+        candidate.route,
+        _participation_model(config),
     )
-    return min(0.98, max(0.02, 1.0 / (1.0 + math.exp(-logit))))
+
+
+def _participation_model(config: ExperimentConfig) -> ParticipationModel:
+    """Translate experiment settings into the solver's shared behavior model."""
+
+    return ParticipationModel(
+        intercept=config.acceptance_intercept,
+        drive_minute_penalty=config.acceptance_drive_penalty,
+        requested_time_deviation_ratio_penalty=(
+            config.acceptance_requested_time_deviation_ratio_penalty
+        ),
+        spatial_deviation_ratio_penalty=(
+            config.acceptance_spatial_deviation_ratio_penalty
+        ),
+    )
 
 
 def gini(values: Iterable[int | float]) -> float:
@@ -1014,7 +1090,6 @@ SUMMARY_CSV_FIELDS: tuple[str, ...] = (
     "pantryServiceGap",
     "averageDriveMinutes",
     "averageDistanceMiles",
-    "averageWaitingMinutes",
     "averagePredepartureWaitMinutes",
     "averageRequestedTimeDeviationMinutes",
     "preferredWindowFitRate",
@@ -1206,6 +1281,26 @@ def _select_assignments(
         matched_count=len(selected),
         route_quality=sum(item.route.score for item in selected),
         runtime_seconds=runtime,
+        expected_completed_deliveries=sum(
+            item.route.acceptance_probability for item in selected
+        ),
+        route_distance_miles=sum(
+            item.route.route_distance_miles for item in selected
+        ),
+        estimated_food_kg=sum(item.route.estimated_food_kg for item in selected),
+        usable_food_kg=sum(item.route.usable_food_kg for item in selected),
+        avoided_system_kg_co2e=sum(
+            item.route.avoided_system_kg_co2e for item in selected
+        ),
+        transport_kg_co2e=sum(
+            item.route.transport_kg_co2e for item in selected
+        ),
+        residual_waste_kg_co2e=sum(
+            item.route.residual_waste_kg_co2e for item in selected
+        ),
+        net_environmental_benefit_kg_co2e=sum(
+            item.route.net_environmental_benefit_kg_co2e for item in selected
+        ),
     )
 
 
@@ -1325,10 +1420,18 @@ def _experiment_assignment(
         pantry_priority=route.pantry_priority,
         route_score=route.score,
         acceptance_probability=probability,
-        distance_miles=_route_distance_miles(request, pickup, pantry),
+        distance_miles=route.route_distance_miles,
         total_trip_minutes=(
             route.finish_at - route.depart_at
         ).total_seconds() / 60,
+        estimated_food_kg=route.estimated_food_kg,
+        usable_food_kg=route.usable_food_kg,
+        avoided_system_kg_co2e=route.avoided_system_kg_co2e,
+        transport_kg_co2e=route.transport_kg_co2e,
+        residual_waste_kg_co2e=route.residual_waste_kg_co2e,
+        net_environmental_benefit_kg_co2e=(
+            route.net_environmental_benefit_kg_co2e
+        ),
         accepted=accepted,
     )
 
@@ -1382,10 +1485,18 @@ def _experiment_candidate(
         pantry_priority=route.pantry_priority,
         route_score=route.score,
         acceptance_probability=probability,
-        distance_miles=_route_distance_miles(request, pickup, pantry),
+        distance_miles=route.route_distance_miles,
         total_trip_minutes=(
             route.finish_at - route.depart_at
         ).total_seconds() / 60,
+        estimated_food_kg=route.estimated_food_kg,
+        usable_food_kg=route.usable_food_kg,
+        avoided_system_kg_co2e=route.avoided_system_kg_co2e,
+        transport_kg_co2e=route.transport_kg_co2e,
+        residual_waste_kg_co2e=route.residual_waste_kg_co2e,
+        net_environmental_benefit_kg_co2e=(
+            route.net_environmental_benefit_kg_co2e
+        ),
         driver_start=(
             request.start_location.latitude,
             request.start_location.longitude,
@@ -1641,6 +1752,18 @@ def _solver_dict(diagnostics: SolverDiagnostics) -> dict[str, Any]:
         "candidateCount": diagnostics.candidate_count,
         "matchedCount": diagnostics.matched_count,
         "routeQuality": round(diagnostics.route_quality, 4),
+        "expectedCompletedDeliveries": round(
+            diagnostics.expected_completed_deliveries, 4
+        ),
+        "routeDistanceMiles": round(diagnostics.route_distance_miles, 4),
+        "estimatedFoodKg": round(diagnostics.estimated_food_kg, 4),
+        "usableFoodKg": round(diagnostics.usable_food_kg, 4),
+        "avoidedSystemKgCO2e": round(diagnostics.avoided_system_kg_co2e, 4),
+        "transportKgCO2e": round(diagnostics.transport_kg_co2e, 4),
+        "residualWasteKgCO2e": round(diagnostics.residual_waste_kg_co2e, 4),
+        "netEnvironmentalBenefitKgCO2e": round(
+            diagnostics.net_environmental_benefit_kg_co2e, 4
+        ),
         "runtimeSeconds": round(diagnostics.runtime_seconds, 6),
         "mipGap": diagnostics.mip_gap,
     }
@@ -1671,12 +1794,18 @@ def _aggregate_metrics(values: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "pantryServiceGap",
         "averageDriveMinutes",
         "averageDistanceMiles",
-        "averageWaitingMinutes",
         "averagePredepartureWaitMinutes",
         "averageRequestedTimeDeviationMinutes",
         "preferredWindowFitRate",
         "averageTotalTripDurationMinutes",
         "averageElapsedFromLoginMinutes",
+        "estimatedFoodKgRedistributed",
+        "usableFoodKgDelivered",
+        "avoidedSystemKgCO2e",
+        "transportKgCO2e",
+        "residualWasteKgCO2e",
+        "netEnvironmentalBenefitKgCO2e",
+        "averageNetEnvironmentalBenefitKgCO2ePerDelivery",
         "systemObjectiveValue",
         "driverAcceptanceRate",
         "expectedDriverAcceptanceRate",

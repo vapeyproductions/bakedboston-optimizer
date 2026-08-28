@@ -21,8 +21,11 @@ For each simulated day, the system:
    staffed windows;
 5. generates synthetic Boston-area volunteer-driver requests;
 6. removes time-infeasible driver–bakery–pantry combinations;
-7. asks Gurobi to maximize completed pickups and then route quality;
-8. records the virtual timeline, assignments, solver diagnostics, and outcomes.
+7. estimates each route's probability of volunteer acceptance with an explicit,
+   synthetic participation model;
+8. asks Gurobi to maximize expected completed pickups and then, within 1% of
+   that optimum, maximize social and sustainable-logistics quality;
+9. records the virtual timeline, assignments, solver diagnostics, and outcomes.
 
 Nothing in a simulation run writes to an organization record, creates an
 account, sends a notification, or represents a real pickup.
@@ -38,10 +41,31 @@ not the departure time. For each feasible timed column \(a\):
 x_a \in \{0,1\}
 \]
 
-Gurobi uses two lexicographic objectives:
+Gurobi uses two hierarchical objectives:
 
-1. maximize the number of assigned bakery pickup occurrences;
-2. among maximum-coverage solutions, maximize pantry priority and route quality.
+1. maximize the expected number of completed bakery pickup occurrences;
+2. among solutions retaining at least 99% of the best first-stage value,
+   maximize pantry priority and sustainable-logistics quality.
+
+For route \(r\), the first-stage coefficient is an inspectable scenario
+estimate—not observed behavior or a trained ML model:
+
+\[
+a_r = \sigma(2.2 - 0.045\,driveMinutes_r
+- 1.8\,outsideWindowRatio_r
+- 1.1\,spatialDeviationRatio_r)
+\]
+
+The optimizer's first stage is therefore
+
+\[
+\max \sum_{r\in R} a_r x_r.
+\]
+
+This directly tests BakedBoston's thesis: a route that technically moves food
+is not useful if its burden makes a volunteer unlikely to accept it. The
+coefficients are reproducible academic assumptions and must not be presented as
+empirically calibrated until real choice data exist.
 
 Candidate quality is:
 
@@ -49,7 +73,25 @@ Candidate quality is:
 q_{d,b,p} = 45\,priority_p - driveMinutes_{d,b,p}
 - 24\,outsideWindowRatio_{d,b,p}
 - 18\,spatialDeviationRatio_{d,b,p}
++ 1.5\,E_{d,b,p}
 \]
+
+Here \(E_{d,b,p}\) is the route's estimated net lifecycle climate benefit:
+
+\[
+E_r = m_r u_r e_{production}
++ m_r e_{avoided\ disposal(h_b)}
+- miles_r e_{vehicle}
+- m_r(1-u_r)e_{residual\ waste}.
+\]
+
+The ledger rewards usable donated food for avoided production and credits the
+donor's avoided disposal pathway, then subtracts vehicle emissions and the
+burden of unusable food entering redistribution. Mileage is not penalized a
+second time in the quality score: driving minutes capture volunteer burden,
+while distance already contributes to the lifecycle term. Food mass, usable
+share, disposal pathway, and emissions factors are transparent academic
+scenario inputs—not measured bakery-specific emissions.
 
 Opening the app creates a decision epoch; it does not force immediate
 departure. The route generator chooses a just-in-time departure, includes 5
@@ -125,8 +167,8 @@ excluded merely for having received food.
 ## Reproducible rolling-horizon comparison
 
 The primary academic experiment compares BakedBoston with five transparent
-baselines over identical 3-, 4-, and 5-day seeded scenarios. The bundled public
-replay uses a five-day horizon, nine fictional bakeries, nine fictional
+baselines over identical five-day seeded scenarios. The bundled public replay
+uses nine fictional bakeries, nine fictional
 pantries, sixty driver requests, and at most three drivers entering any one
 decision epoch:
 
@@ -134,7 +176,7 @@ decision epoch:
 python3 -m bakedboston_optimizer.compare \
   data/academic_comparison_snapshot.json \
   --start-date 2026-08-24 \
-  --horizons 3,4,5 \
+  --horizons 5 \
   --seeds 2026,2027,2028 \
   --drivers-per-day 12 \
   --max-simultaneous-drivers 3 \
@@ -142,11 +184,11 @@ python3 -m bakedboston_optimizer.compare \
   --summary-csv comparison-summary.csv
 ```
 
-Use `--disable-acceptance` for the deterministic routing-capacity comparison
-shown on the public simulator: every driver selects the highest-scoring route
-in their conflict-free recommendation list. A transparent behavioral model can
-also be enabled as a separate sensitivity analysis; its expected acceptance and
-likely-rejection measures are diagnostics rather than observed behavior.
+Use `--disable-acceptance` for a deterministic routing-capacity sensitivity
+analysis. In the primary participation-aware experiment, the first-stage MIP
+uses expected acceptance while the event replay samples accept/reject outcomes
+from the same transparent behavioral assumptions. Expected acceptance and
+likely-rejection measures remain model-based diagnostics, not observed behavior.
 `--matching-interval-minutes` controls how closely arriving drivers are grouped
 into one network-wide Gurobi solve. The JSON contains the complete auditable
 event trace; the CSV contains one analysis-ready row per horizon and policy.
@@ -161,10 +203,48 @@ The bundled academic comparison fixture is deliberately contention-rich: nine
 fictional bakeries, nine fictional pantries, and fewer drivers than available
 pickups force the policies to make meaningfully different choices. A fixed-seed
 regression test verifies that the Gurobi policy attains the highest declared
-system-objective value in this demonstration while the metrics still expose
+system-quality value in its deterministic sensitivity analysis while the metrics still expose
 tradeoffs in completion, distance, pantry reach, and equity. A baseline may
 legitimately win an individual column; the MIP is optimal for its stated
-lexicographic objective, not for every evaluation measure simultaneously.
+hierarchical objective, not for every evaluation measure simultaneously.
+
+## Research foundation
+
+BakedBoston adapts established OR structures rather than claiming that food
+rescue routing is a new problem class:
+
+- [Nair et al. (2018)](https://doi.org/10.1016/j.seps.2017.06.003) integrate
+  scheduling, assignment, and pickup-and-delivery routing for food rescue.
+- [Hernandez-Perez and Salazar-Gonzalez (2007)](https://doi.org/10.1002/net.20209)
+  provide an exact formulation for the one-commodity pickup-and-delivery
+  traveling-salesman problem, a useful structural ancestor for unpaired surplus
+  pickup and pantry delivery.
+- [Rey, Almi'ani, and Nair (2018)](https://doi.org/10.1016/j.tre.2018.02.001)
+  model envy-free food-rescue allocation, while
+  [Orgut et al. (2018)](https://doi.org/10.1016/j.ejor.2018.02.017) study robust,
+  equitable donated-food distribution. These motivate measuring service gaps
+  and rewarding opportunity-based pantry priority rather than minimizing miles
+  alone.
+- [The online VRP with occasional drivers (2021)](https://doi.org/10.1016/j.cor.2020.105144)
+  and [optimization of driver menus under stochastic selection (2021)](https://doi.org/10.1016/j.tre.2021.102419)
+  motivate rolling decision epochs and explicit route acceptance.
+- [Beyond efficiency (2025)](https://doi.org/10.1016/j.orl.2025.107344) examines
+  the cost of prioritizing driver satisfaction in vehicle routing, supporting
+  the project's central evaluation question: can preference-aware logistics
+  preserve social impact while improving volunteer participation?
+- [Guo et al. (2026)](https://doi.org/10.3390/foods15040645) compare eight food-
+  donation and redistribution scenarios with life-cycle assessment. Their
+  results motivate treating environmental performance as avoided production
+  and disposal minus transportation and redistribution-waste burdens—not as a
+  synonym for shortest distance. They also show why food usability, sorting,
+  disposal counterfactuals, and substitution assumptions belong in sensitivity
+  analysis.
+
+The papers motivate the structure and evaluation criteria; BakedBoston's
+current participation coefficients are still synthetic. The implementation
+does **not** claim to use the papers' exact algorithms, learned parameters, or
+data. See [docs/research.md](docs/research.md) for the implemented-versus-future
+mapping.
 
 ## Driver recommendation trace
 
@@ -219,7 +299,7 @@ work.
 python3 -m bakedboston_optimizer.simulate \
   data/example_schedule_snapshot.json \
   --start-date 2026-08-24 \
-  --days 7 \
+  --days 5 \
   --seed 2026 \
   --drivers-per-day 8 \
   --output simulation-result.json
@@ -239,7 +319,7 @@ snapshot supplied by the BakedBoston database:
 {
   "mode": "schedule_simulation",
   "startDate": "2026-08-24",
-  "days": 7,
+  "days": 5,
   "randomSeed": 2026,
   "driversPerDay": 8,
   "bakeryFoodProbability": 0.75,
@@ -260,13 +340,17 @@ Each report includes:
 - **pantry coverage:** unique and percentage of available pantries served;
 - **pantries never served:** count and fraction receiving no delivery;
 - **distribution fairness:** pantry-service Gini coefficient and service gap;
-- **mean route burden:** driving minutes, distance, waiting time, preferred-
-  destination deviation, and total trip duration;
+- **mean route burden:** driving minutes, distance, requested-time deviation,
+  preferred-destination deviation, and total trip duration;
 - **unserved pickups:** food-ready windows that expired without assignment;
 - **driver acceptance:** deterministic selected-route share in the public replay,
   plus expected acceptance under the optional behavioral assumption;
 - **rejection diagnostics:** predicted likely-rejected offer count and rate;
 - **computational performance:** Gurobi runtime, status, and optimality gap;
+- **lifecycle environmental performance:** estimated food collected, usable
+  food delivered, avoided production-and-disposal emissions, vehicle emissions,
+  residual redistribution-waste emissions, net kg CO2e benefit, and net benefit
+  per completed delivery;
 - **objective evidence:** total declared system-objective value and feasible
   candidate count; and
 - a timestamped event log containing every route recommended to each driver and
@@ -276,16 +360,17 @@ No policy is expected to win every column. A highest-priority-first rule can,
 for example, produce a lower pantry-service Gini coefficient while leaving an
 eligible pickup unserved. A shortest-route rule can minimize driving while
 repeatedly serving fewer pantries. The MIP is evaluated against its declared
-lexicographic objective: first maximize completed pickups, then maximize total
-route quality across simultaneous drivers subject to assignment and timing
-constraints.
+hierarchical objective: first maximize expected completed pickups, then
+maximize social and sustainable-logistics quality within 1% of that best
+expected-completion value, subject to assignment and timing constraints.
 
 ## Repository structure
 
 ```text
 bakedboston_optimizer/
+  environment.py      Transparent lifecycle CO2e scenario accounting
   experiment.py       Rolling-horizon policies, acceptance, evaluation
-  compare.py          3/4/5-day policy-comparison CLI
+  compare.py          Five-day policy-comparison CLI
   simulation.py       Virtual schedule clock, seeded events, metrics
   simulate.py         Local scenario runner
   optimizer.py        Candidate feasibility and Gurobi MIP
@@ -297,6 +382,8 @@ data/
   example_schedule_snapshot.json
 docs/
   model.md
+  research.md
+  simulation.md
   simulation.md
 api/
   recommendations.py
@@ -313,7 +400,7 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 The tests cover Gurobi assignment constraints, feasibility, schedule expansion,
 monthly/one-time semantics, exceptions, pantry priority, API dispatch, seeded
 reproducibility, rolling-horizon policy comparisons, conflict-free assignments,
-fairness metrics, and 3/4/5-day reports.
+fairness metrics, and five-day reports.
 
 ## Research extensions
 

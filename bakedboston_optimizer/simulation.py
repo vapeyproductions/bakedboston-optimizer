@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from .models import (
     AddressValidationStatus,
     BakeryPickup,
+    DisposalPathway,
     DriverRequest,
     Location,
     NetworkOptimizationResult,
@@ -86,6 +87,12 @@ class SimulationAssignment:
     waiting_minutes: float
     pantry_priority: float
     score: float
+    estimated_food_kg: float
+    usable_food_kg: float
+    avoided_system_kg_co2e: float
+    transport_kg_co2e: float
+    residual_waste_kg_co2e: float
+    net_environmental_benefit_kg_co2e: float
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -103,6 +110,14 @@ class SimulationAssignment:
             "waitingMinutes": round(self.waiting_minutes, 2),
             "pantryPriority": round(self.pantry_priority, 4),
             "score": round(self.score, 3),
+            "estimatedFoodKg": round(self.estimated_food_kg, 3),
+            "usableFoodKg": round(self.usable_food_kg, 3),
+            "avoidedSystemKgCO2e": round(self.avoided_system_kg_co2e, 3),
+            "transportKgCO2e": round(self.transport_kg_co2e, 3),
+            "residualWasteKgCO2e": round(self.residual_waste_kg_co2e, 3),
+            "netEnvironmentalBenefitKgCO2e": round(
+                self.net_environmental_benefit_kg_co2e, 3
+            ),
         }
 
 
@@ -151,6 +166,18 @@ class SimulationReport:
         served_opportunities = sum(
             item["served"] for item in self.pantry_opportunities.values()
         )
+        estimated_food_kg = sum(item.estimated_food_kg for item in assignments)
+        usable_food_kg = sum(item.usable_food_kg for item in assignments)
+        avoided_system_kg_co2e = sum(
+            item.avoided_system_kg_co2e for item in assignments
+        )
+        transport_kg_co2e = sum(item.transport_kg_co2e for item in assignments)
+        residual_waste_kg_co2e = sum(
+            item.residual_waste_kg_co2e for item in assignments
+        )
+        net_environmental_benefit_kg_co2e = sum(
+            item.net_environmental_benefit_kg_co2e for item in assignments
+        )
         return {
             "scheduledPickupWindows": sum(day.scheduled_pickup_windows for day in self.days),
             "foodAvailablePickups": food_pickups,
@@ -170,6 +197,18 @@ class SimulationReport:
             ),
             "averageWaitingMinutes": (
                 round(sum(item.waiting_minutes for item in assignments) / len(assignments), 2)
+                if assignments else 0.0
+            ),
+            "estimatedFoodKgRedistributed": round(estimated_food_kg, 3),
+            "usableFoodKgDelivered": round(usable_food_kg, 3),
+            "avoidedSystemKgCO2e": round(avoided_system_kg_co2e, 3),
+            "transportKgCO2e": round(transport_kg_co2e, 3),
+            "residualWasteKgCO2e": round(residual_waste_kg_co2e, 3),
+            "netEnvironmentalBenefitKgCO2e": round(
+                net_environmental_benefit_kg_co2e, 3
+            ),
+            "averageNetEnvironmentalBenefitKgCO2ePerDelivery": (
+                round(net_environmental_benefit_kg_co2e / len(assignments), 3)
                 if assignments else 0.0
             ),
             "totalSolverRuntimeSeconds": round(
@@ -334,6 +373,14 @@ def _assignments(result: NetworkOptimizationResult) -> tuple[SimulationAssignmen
             waiting_minutes=assignment.route.waiting_minutes,
             pantry_priority=assignment.route.pantry_priority,
             score=assignment.route.score,
+            estimated_food_kg=assignment.route.estimated_food_kg,
+            usable_food_kg=assignment.route.usable_food_kg,
+            avoided_system_kg_co2e=assignment.route.avoided_system_kg_co2e,
+            transport_kg_co2e=assignment.route.transport_kg_co2e,
+            residual_waste_kg_co2e=assignment.route.residual_waste_kg_co2e,
+            net_environmental_benefit_kg_co2e=(
+                assignment.route.net_environmental_benefit_kg_co2e
+            ),
         )
         for assignment in result.assignments
     )
@@ -347,6 +394,18 @@ def _solver_dict(result: NetworkOptimizationResult) -> dict[str, Any]:
         "candidateCount": diagnostics.candidate_count,
         "matchedCount": diagnostics.matched_count,
         "routeQuality": round(diagnostics.route_quality, 4),
+        "expectedCompletedDeliveries": round(
+            diagnostics.expected_completed_deliveries, 4
+        ),
+        "routeDistanceMiles": round(diagnostics.route_distance_miles, 4),
+        "estimatedFoodKg": round(diagnostics.estimated_food_kg, 4),
+        "usableFoodKg": round(diagnostics.usable_food_kg, 4),
+        "avoidedSystemKgCO2e": round(diagnostics.avoided_system_kg_co2e, 4),
+        "transportKgCO2e": round(diagnostics.transport_kg_co2e, 4),
+        "residualWasteKgCO2e": round(diagnostics.residual_waste_kg_co2e, 4),
+        "netEnvironmentalBenefitKgCO2e": round(
+            diagnostics.net_environmental_benefit_kg_co2e, 4
+        ),
         "runtimeSeconds": round(diagnostics.runtime_seconds, 6),
         "mipGap": diagnostics.mip_gap,
     }
@@ -483,6 +542,19 @@ def _sample_food_availability(
     for pickup in scheduled:
         has_food = rng.random() < probability
         if has_food:
+            estimated_food_kg = round(rng.uniform(8.0, 28.0), 2)
+            usable_fraction = round(rng.uniform(0.65, 0.95), 3)
+            disposal_pathway = (
+                DisposalPathway.LANDFILL
+                if rng.random() < 0.70
+                else DisposalPathway.COMPOST
+            )
+            pickup = replace(
+                pickup,
+                estimated_food_kg=estimated_food_kg,
+                usable_fraction=usable_fraction,
+                donor_disposal_baseline=disposal_pathway,
+            )
             available.append(pickup)
         events.append(SimulationEvent(
             occurred_at=pickup.ready_at,
@@ -491,7 +563,11 @@ def _sample_food_availability(
             organization_id=pickup.id,
             organization_name=pickup.bakery_name,
             detail=(
-                "Synthetic surplus is available for this schedule occurrence."
+                (
+                    f"Synthetic surplus: {pickup.estimated_food_kg:.1f} kg, "
+                    f"{pickup.usable_fraction:.0%} usable, with a "
+                    f"{pickup.donor_disposal_baseline.value} counterfactual."
+                )
                 if has_food else "No surplus was generated for this schedule occurrence."
             ),
         ))

@@ -7,6 +7,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+from .environment import DEFAULT_ENVIRONMENTAL_ASSUMPTIONS
 from .experiment import (
     DEFAULT_POLICIES,
     ExperimentConfig,
@@ -22,7 +23,10 @@ from .travel import HaversineTravelTimeProvider
 POLICY_METADATA = {
     "bakedboston_mip": {
         "label": "BakedBoston Gurobi MIP",
-        "description": "Maximizes completed assignments first, then total route quality across simultaneous drivers.",
+        "description": (
+            "Maximizes expected completed assignments first, then lifecycle-aware social and "
+            "route quality across simultaneous drivers."
+        ),
     },
     "random_feasible": {
         "label": "Random feasible",
@@ -173,6 +177,19 @@ def build_web_payload(
             for key, value in asdict(weights).items()
             if value != 0
         },
+        "environmentalAssumptions": {
+            "avoidedProductionKgCo2ePerKgUsableFood": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.avoided_production_kg_co2e_per_usable_kg,
+            "avoidedLandfillKgCo2ePerKgDonatedFood": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.avoided_landfill_kg_co2e_per_diverted_kg,
+            "avoidedCompostKgCo2ePerKgDonatedFood": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.avoided_compost_kg_co2e_per_diverted_kg,
+            "redistributionResidualWasteKgCo2ePerKg": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.redistribution_waste_kg_co2e_per_kg,
+            "vehicleKgCo2ePerMile": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.vehicle_kg_co2e_per_mile,
+            "interpretation": (
+                "Declared academic lifecycle scenario parameters for comparative analysis. Net "
+                "benefit combines avoided food production and donor disposal with vehicle "
+                "emissions and residual redistribution waste. These are not measured bakery-specific "
+                "emissions or a verified BakedBoston carbon inventory."
+            ),
+        },
         "network": _network_payload(snapshot),
         "selectionRule": (
             "The joint Gurobi solve first maximizes the number of simultaneous drivers who receive "
@@ -198,7 +215,7 @@ def build_web_payload(
             ),
             "comparison": (
                 "Policies share identical synthetic surplus, pantry, and driver events. A policy may "
-                "win an individual metric without maximizing the BakedBoston lexicographic objective."
+                "win an individual metric without maximizing the BakedBoston hierarchical objective."
             ),
         },
     })

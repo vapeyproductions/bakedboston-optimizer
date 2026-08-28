@@ -11,6 +11,13 @@ class AddressValidationStatus(StrEnum):
     NEEDS_REVIEW = "needs_review"
 
 
+class DisposalPathway(StrEnum):
+    """Counterfactual destination for surplus food if it is not donated."""
+
+    LANDFILL = "landfill"
+    COMPOST = "compost"
+
+
 @dataclass(frozen=True)
 class Location:
     """An address-first location with a cached computational geocode."""
@@ -32,6 +39,17 @@ class BakeryPickup:
     ready_at: datetime
     pickup_deadline: datetime
     claimed: bool = False
+    # Academic scenario estimates used by the lifecycle-impact calculation.
+    # They are intentionally explicit rather than inferred from route miles.
+    estimated_food_kg: float = 20.0
+    usable_fraction: float = 0.80
+    donor_disposal_baseline: DisposalPathway = DisposalPathway.LANDFILL
+
+    def __post_init__(self) -> None:
+        if self.estimated_food_kg < 0:
+            raise ValueError("estimated_food_kg cannot be negative")
+        if not 0 <= self.usable_fraction <= 1:
+            raise ValueError("usable_fraction must be between 0 and 1")
 
 
 @dataclass(frozen=True)
@@ -127,6 +145,14 @@ class RouteCandidate:
     normalized_origin_deviation: float = 0.0
     normalized_destination_deviation: float = 0.0
     normalized_spatial_deviation: float = 0.0
+    route_distance_miles: float = 0.0
+    acceptance_probability: float = 1.0
+    estimated_food_kg: float = 0.0
+    usable_food_kg: float = 0.0
+    avoided_system_kg_co2e: float = 0.0
+    transport_kg_co2e: float = 0.0
+    residual_waste_kg_co2e: float = 0.0
+    net_environmental_benefit_kg_co2e: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -147,6 +173,14 @@ class SolverDiagnostics:
     route_quality: float
     runtime_seconds: float
     mip_gap: float | None = None
+    expected_completed_deliveries: float = 0.0
+    route_distance_miles: float = 0.0
+    estimated_food_kg: float = 0.0
+    usable_food_kg: float = 0.0
+    avoided_system_kg_co2e: float = 0.0
+    transport_kg_co2e: float = 0.0
+    residual_waste_kg_co2e: float = 0.0
+    net_environmental_benefit_kg_co2e: float = 0.0
 
 
 @dataclass(frozen=True)

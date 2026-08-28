@@ -36,7 +36,9 @@ The seed controls three uncertain inputs:
 1. whether a scheduled bakery occurrence generates hypothetical surplus;
 2. whether staff are available for a staffed pantry occurrence;
 3. where and when synthetic volunteer drivers are available, including whether
-   they supply a preferred destination.
+   they supply a preferred destination; and
+4. estimated surplus-food mass, usable share, and the donor's landfill-or-
+   compost disposal counterfactual.
 
 Unattended pantry windows are treated as available whenever the public schedule
 window is active.
@@ -66,8 +68,12 @@ Every policy receives the exact same feasible candidate set. Time-window and
 location validity are therefore constraints for all policies, not advantages
 given only to BakedBoston.
 
-- **BakedBoston MIP:** lexicographically maximizes assigned pickups, then total
-  route quality across all drivers at that epoch.
+- **BakedBoston MIP:** hierarchically maximizes expected completed pickups, then
+  retains at least 99% of that value while maximizing pantry-priority reward and
+  minimizing driver burden, requested-time miss, and spatial miss while
+  rewarding estimated net lifecycle climate benefit. That benefit credits
+  avoided food production and donor disposal, then subtracts vehicle emissions
+  and residual redistribution-waste emissions.
 - **Random feasible:** selects a seeded random conflict-free assignment.
 - **Shortest route:** greedily minimizes driving time.
 - **Earliest deadline:** greedily serves the bakery pickup with the earliest
@@ -93,11 +99,13 @@ driver received and the highest-scoring route they selected.
 ## Synthetic driver acceptance
 
 An offered route is accepted with a seeded logistic probability that decreases
-with drive minutes, the proportional requested-time-window miss, and
-destination-deviation minutes. Planned waiting before departure is not treated
-as a burden. This is an explicit behavioral assumption, not a trained
-machine-learning model. It can be disabled for a pure routing-capacity
-experiment.
+with drive minutes, the proportional requested-time-window miss, and normalized
+start/destination-area miss. Planned waiting before departure is not treated as
+a burden. The same transparent estimate supplies the primary MIP's first-stage
+coefficient, so participation is part of the routing decision rather than only
+an after-the-fact dashboard diagnostic. This is an explicit behavioral
+assumption, not a trained machine-learning model. It can be disabled for a pure
+routing-capacity sensitivity analysis.
 
 ## Pantry opportunity history
 
@@ -122,22 +130,26 @@ The comparison report includes:
 - pantry coverage as both a count and percentage;
 - pantries never served as both a count and percentage;
 - distribution fairness as a pantry-service Gini coefficient and service gap;
-- mean drive time, distance, waiting time, preferred-destination deviation, and
+- mean drive time, distance, preferred-destination deviation, and
   total trip duration;
+- estimated food collected and usable food delivered;
+- avoided food-production and donor-disposal emissions, vehicle emissions,
+  residual redistribution-waste emissions, net kg CO2e benefit, and net benefit
+  per completed delivery;
 - offers, accepted routes, simulated rejections, expected acceptance, likely
   rejections, and likely-rejection rate;
 - feasible candidates examined and the declared system-objective value; and
 - Gurobi runtime, solve status, and MIP gap.
 
-The standard experiment evaluates 3-, 4-, and 5-day horizons, optionally over
-multiple random seeds, and reports the mean of every metric for each policy.
+The standard experiment evaluates a five-day horizon, optionally over multiple
+random seeds, and reports the mean of every metric for each policy.
 Passing `--summary-csv` also writes one flat row per horizon and policy for
 spreadsheet analysis and presentation charts; the JSON remains the complete
 auditable event trace.
-Run once with acceptance enabled to estimate likely completions and once with
-`--disable-acceptance` to isolate the routing model's capacity. Reporting both
-prevents the behavioral assumption from being mistaken for an optimization
-result.
+Run once with acceptance enabled for the primary participation-aware experiment
+and once with `--disable-acceptance` to isolate deterministic routing capacity.
+Reporting both prevents the behavioral assumption from being mistaken for an
+observed result.
 
 ## Bundled comparison fixture
 

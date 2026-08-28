@@ -85,14 +85,43 @@ outside those areas; an exact match has zero deviation and receives no bonus.
 
 ## Candidate quality
 
-For feasible assignment \((d,b,p)\):
+Environmental impact is not represented by mileage alone. For feasible route
+\(r=(d,b,p)\), the model first constructs a transparent lifecycle ledger:
 
 \[
-quality_{d,b,p} =
+E_r = m_r u_r e_{production}
++ m_r e_{avoided\ disposal}(h_b)
+- \ell_r e_{vehicle}
+- m_r(1-u_r)e_{residual\ waste}
+\]
+
+where:
+
+- \(m_r\) is the estimated kilograms collected from the bakery occurrence;
+- \(u_r\) is the share expected to remain usable after redistribution;
+- \(h_b\) is the bakery's counterfactual disposal pathway (landfill or compost);
+- \(\ell_r\) is the full driver-origin → bakery → pantry route distance;
+- the first two terms are avoided food-production and disposal impacts; and
+- the last two terms are vehicle emissions and the burden of unusable food
+  entering the redistribution chain.
+
+Positive \(E_r\) means the modeled avoided food-system emissions exceed the
+route and residual-waste burdens. The default academic scenario uses 0.42 kg
+CO₂e per usable kilogram for avoided production, 0.16 kg CO₂e/kg for avoided
+landfill or 0.04 kg CO₂e/kg for avoided compost, 0.32 kg CO₂e per route mile,
+and 0.20 kg CO₂e/kg of residual redistribution waste. These are explicit
+scenario parameters for comparison—not measured bakery-specific emissions or
+a verified carbon inventory.
+
+Route quality is then:
+
+\[
+quality_r =
 45 \cdot priority_p
-- driveMinutes_{d,b,p}
-- 24 \cdot outsideWindowRatio_{d,b,p}
-- 18 \cdot spatialDeviationRatio_{d,b,p}
+- driveMinutes_r
+- 24 \cdot outsideWindowRatio_r
+- 18 \cdot spatialDeviationRatio_r
++ 1.5 \cdot E_r
 \]
 
 where:
@@ -140,30 +169,70 @@ normalized components. If every alternative has zero deviation for one
 component, that component contributes zero. This creates a relative penalty in
 \([0,1]\), favors the closest alternatives, and never rewards an exact match.
 
-The weights are centralized in `OptimizationWeights` so they can be tested and tuned without changing the constraints.
+Distance is not charged a second time as a generic mileage proxy. Drive minutes
+represent volunteer burden and traffic, while route miles enter the lifecycle
+ledger as vehicle emissions. This separation avoids double-counting distance
+and allows a slightly longer route to remain preferable when it moves more
+usable food, avoids a higher-impact disposal pathway, or reaches a pantry with
+a larger service gap. The weights and environmental assumptions are centralized
+so they can be tested and tuned without changing the constraints.
 
-## Lexicographic objectives
+## Participation estimate
 
-The Gurobi model uses two ordered objectives.
-
-First, maximize the number of bakery pickups assigned:
+Technical feasibility does not guarantee that a volunteer would accept a
+route. Each feasible route therefore receives an estimated acceptance
+probability:
 
 \[
-\max \sum_{a \in A} x_a
+a_r = \sigma(\theta_0
+- \theta_t driveMinutes_r
+- \theta_w outsideWindowRatio_r
+- \theta_s spatialDeviationRatio_r)
 \]
 
-Second, among solutions with the same number of assignments, maximize route quality:
+with the current academic scenario parameters
 
 \[
-\max \sum_{a \in A} quality_a x_a
+(\theta_0,\theta_t,\theta_w,\theta_s)=(2.2,0.045,1.8,1.1).
 \]
 
-This ordering prevents a negative route score from causing viable food to be left unmatched. The solver first saves as many pickups as possible, then chooses the fairest and most travel-efficient version of that maximum-coverage solution.
+The estimate falls when a route requires more driving or fits the volunteer's
+requested time and geography less closely. The estimate is clipped to
+\([0.02,0.98]\) for stable scenario analysis. It is intentionally simple,
+inspectable, and replaceable. These coefficients are synthetic assumptions,
+not learned from volunteer behavior and not validated probabilities.
+
+## Hierarchical objectives
+
+The Gurobi model uses two ordered objectives. First, maximize the expected
+number of completed pickups:
+
+\[
+Z_1 = \max \sum_{a \in A} a_a x_a
+\]
+
+where \(a_a\) is the estimated acceptance probability of timed route column
+\(a\). A technically feasible assignment with low predicted acceptance can
+therefore lose to a more volunteer-compatible assignment with greater expected
+completion.
+
+Second, among solutions retaining at least 99% of the optimal first-stage
+value, maximize social and sustainable-logistics quality:
+
+\[
+Z_2 = \max \sum_{a \in A} quality_a x_a.
+\]
+
+The 1% tolerance avoids sacrificing meaningful expected completion for a
+secondary improvement while allowing the solver to choose a materially fairer,
+more volunteer-compatible, or environmentally stronger solution when its
+participation performance is essentially tied.
 
 This is deliberately **not** an average-score objective. Maximizing the average
 of recommendation menus can improve the displayed mean while serving fewer
-pickups. Lexicographic maximum coverage makes the operational priority explicit
-and gives route quality control only after coverage has been fixed.
+pickups. The hierarchical expected-completion objective makes the operational
+priority explicit and gives route quality control only after participation has
+been protected.
 
 At each rolling decision epoch, the model solves over all drivers who arrived in
 that epoch and all pickups still available. Accepted assignments consume their
@@ -176,6 +245,13 @@ feasible timed duties, attach preference penalties, then select a globally
 consistent set at each decision epoch. BakedBoston can enumerate its small
 academic instances directly; column generation would be the natural scaling
 path if the feasible-route set became too large to enumerate.
+
+The formulation is informed by food-rescue pickup-and-delivery, equitable
+donated-food distribution, occasional-driver routing, and driver-choice
+research. The precise relationship between the implementation and that
+literature is documented in [research.md](research.md); references there are
+context and design evidence, not a claim that BakedBoston reproduces each
+paper's full algorithm.
 
 ## Constraints
 
@@ -207,7 +283,15 @@ The API returns the selected assignments plus:
 - optimization status;
 - feasible candidate count;
 - matched assignment count;
+- expected completed deliveries;
 - total route quality;
+- total route mileage;
+- estimated kilograms entering redistribution;
+- usable kilograms delivered;
+- avoided upstream and counterfactual-disposal emissions;
+- route-transport emissions;
+- residual redistribution-waste emissions;
+- net environmental benefit in kg CO₂e;
 - runtime;
 - MIP gap when Gurobi exposes it.
 

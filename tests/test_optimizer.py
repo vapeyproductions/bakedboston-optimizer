@@ -18,6 +18,7 @@ from bakedboston_optimizer.optimizer import (
     _distance_outside_preference_area,
     _normalize_spatial_deviation,
     allocate_recommendation_layer,
+    optimize_assignment_candidates,
     optimize_network,
     rank_routes,
 )
@@ -217,7 +218,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(result.diagnostics.matched_count, 1)
         self.assertEqual(len({item.driver_id for item in result.assignments}), 1)
 
-    def test_delivery_count_is_optimized_before_route_quality(self) -> None:
+    def test_expected_completions_are_optimized_before_route_quality(self) -> None:
         second_pickup = BakeryPickup(
             id="b2",
             bakery_name="Second Bakery",
@@ -261,6 +262,27 @@ class OptimizerTests(unittest.TestCase):
 
         self.assertEqual(result.diagnostics.matched_count, 2)
         self.assertLess(result.diagnostics.route_quality, 0)
+
+    def test_participation_estimate_can_outweigh_route_quality(self) -> None:
+        candidates = [
+            self.assignment(
+                "r1", "d1", "b1", "p1", 5,
+                acceptance_probability=0.90,
+            ),
+            self.assignment(
+                "r1", "d1", "b2", "p2", 100,
+                acceptance_probability=0.40,
+            ),
+        ]
+
+        result = optimize_assignment_candidates(candidates)
+
+        self.assertEqual(result.diagnostics.matched_count, 1)
+        self.assertEqual(result.assignments[0].route.bakery_id, "b1")
+        self.assertAlmostEqual(
+            result.diagnostics.expected_completed_deliveries,
+            0.90,
+        )
 
     def test_route_quality_breaks_ties_between_equal_match_counts(self) -> None:
         lower_priority = Pantry(
@@ -353,6 +375,7 @@ class OptimizerTests(unittest.TestCase):
         bakery_id: str,
         pantry_id: str,
         score: float,
+        acceptance_probability: float = 1.0,
     ) -> AssignmentCandidate:
         timestamp = self.day.replace(hour=17)
         return AssignmentCandidate(
@@ -375,6 +398,7 @@ class OptimizerTests(unittest.TestCase):
                 pantry_priority=0.5,
                 score=score,
                 explanation=(),
+                acceptance_probability=acceptance_probability,
             ),
         )
 

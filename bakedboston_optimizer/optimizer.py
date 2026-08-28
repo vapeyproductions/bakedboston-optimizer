@@ -4,10 +4,16 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from itertools import product
 import atexit
+import math
 import os
 from threading import RLock
 from typing import TYPE_CHECKING, Sequence
 
+from .environment import (
+    DEFAULT_ENVIRONMENTAL_ASSUMPTIONS,
+    EnvironmentalAssumptions,
+    estimate_route_environmental_impact,
+)
 from .models import (
     AssignmentCandidate,
     BakeryPickup,
@@ -52,6 +58,29 @@ class OptimizationWeights:
     spatial_deviation_ratio_penalty: float = 18.0
     requested_time_deviation_minute_penalty: float = 0.0
     requested_time_deviation_ratio_penalty: float = 24.0
+    # Retained for backwards-compatible saved configurations. The default is
+    # zero because vehicle emissions are now included in the lifecycle-aware
+    # net environmental benefit below rather than charged twice.
+    route_mile_penalty: float = 0.0
+    # Reward one estimated kilogram of net avoided CO2e. This lifecycle-aware
+    # term credits usable food and avoided disposal, then subtracts transport
+    # and residual redistribution-waste emissions.
+    environmental_benefit_reward: float = 1.5
+
+
+@dataclass(frozen=True)
+class ParticipationModel:
+    """Transparent scenario model for the probability a driver accepts a route.
+
+    These coefficients are experimental assumptions, not learned behavioral
+    estimates.  They make the participation hypothesis testable now and can be
+    replaced with coefficients fitted to observed choices in future studies.
+    """
+
+    intercept: float = 2.2
+    drive_minute_penalty: float = 0.045
+    requested_time_deviation_ratio_penalty: float = 1.8
+    spatial_deviation_ratio_penalty: float = 1.1
 
 
 class GurobiUnavailableError(RuntimeError):
@@ -84,6 +113,7 @@ def rank_routes(
     weights: OptimizationWeights = OptimizationWeights(),
     pickup_service_minutes: int = 5,
     dropoff_service_minutes: int = 5,
+    environmental_assumptions: EnvironmentalAssumptions = DEFAULT_ENVIRONMENTAL_ASSUMPTIONS,
 ) -> list[RouteCandidate]:
     """Generate feasible routes and rank them with a Gurobi solution pool.
 
@@ -102,6 +132,7 @@ def rank_routes(
             weights,
             pickup_service_minutes,
             dropoff_service_minutes,
+            environmental_assumptions,
         )
         if candidate is not None:
             feasible_candidates.append(candidate)
@@ -130,15 +161,20 @@ def optimize_network(
     weights: OptimizationWeights = OptimizationWeights(),
     pickup_service_minutes: int = 5,
     dropoff_service_minutes: int = 5,
+    environmental_assumptions: EnvironmentalAssumptions = DEFAULT_ENVIRONMENTAL_ASSUMPTIONS,
 ) -> NetworkOptimizationResult:
     """Select a globally consistent set of driver-pickup-pantry assignments.
 
-    The first objective maximizes completed bakery pickups. The second objective
-    maximizes route quality, which rewards pantry priority and penalizes driving,
-    proportional requested-window deviation, and distance from a driver's
-    requested start and destination ZIP areas. Pantries do not receive a
-    capacity constraint because BakedBoston intentionally allows a
-    pantry to accept multiple deliveries while its receiving window is open.
+    The first objective maximizes expected completed bakery pickups using the
+    transparent route-acceptance estimate. The second objective, optimized
+    within one percent of the best first-stage value, maximizes social and
+    logistics quality: pantry priority is rewarded while driving, mileage,
+    proportional requested-window deviation, and distance from the driver's
+    requested ZIP areas are penalized. Net estimated lifecycle CO2e benefit is
+    rewarded: usable food and avoided disposal count positively, while vehicle
+    travel and residual redistribution waste count negatively. Pantries do not
+    receive a capacity constraint because BakedBoston intentionally allows
+    multiple deliveries during an open receiving window.
     """
 
     candidates = list(enumerate_assignment_candidates(
@@ -149,6 +185,7 @@ def optimize_network(
         weights,
         pickup_service_minutes,
         dropoff_service_minutes,
+        environmental_assumptions,
     ))
     return optimize_assignment_candidates(candidates)
 
@@ -186,6 +223,29 @@ def optimize_assignment_candidates(
                 matched_count=len(assignments),
                 route_quality=sum(item.route.score for item in assignments),
                 runtime_seconds=0.0,
+                expected_completed_deliveries=sum(
+                    item.route.acceptance_probability for item in assignments
+                ),
+                route_distance_miles=sum(
+                    item.route.route_distance_miles for item in assignments
+                ),
+                estimated_food_kg=sum(
+                    item.route.estimated_food_kg for item in assignments
+                ),
+                usable_food_kg=sum(item.route.usable_food_kg for item in assignments),
+                avoided_system_kg_co2e=sum(
+                    item.route.avoided_system_kg_co2e for item in assignments
+                ),
+                transport_kg_co2e=sum(
+                    item.route.transport_kg_co2e for item in assignments
+                ),
+                residual_waste_kg_co2e=sum(
+                    item.route.residual_waste_kg_co2e for item in assignments
+                ),
+                net_environmental_benefit_kg_co2e=sum(
+                    item.route.net_environmental_benefit_kg_co2e
+                    for item in assignments
+                ),
             ),
         )
 
@@ -299,6 +359,7 @@ def enumerate_assignment_candidates(
     weights: OptimizationWeights = OptimizationWeights(),
     pickup_service_minutes: int = 5,
     dropoff_service_minutes: int = 5,
+    environmental_assumptions: EnvironmentalAssumptions = DEFAULT_ENVIRONMENTAL_ASSUMPTIONS,
 ) -> tuple[AssignmentCandidate, ...]:
     """Enumerate and score every feasible driver-bakery-pantry route.
 
@@ -316,6 +377,7 @@ def enumerate_assignment_candidates(
         weights,
         pickup_service_minutes,
         dropoff_service_minutes,
+        environmental_assumptions,
     ))
 
 
@@ -367,11 +429,15 @@ def _solve_network_model(
 
     model.ModelSense = GRB.MAXIMIZE
     model.setObjectiveN(
-        gp.quicksum(route_vars.values()),
+        gp.quicksum(
+            candidate.route.acceptance_probability * route_vars[index]
+            for index, candidate in enumerate(candidates)
+        ),
         index=0,
         priority=2,
         weight=1.0,
-        name="maximize_completed_pickups",
+        reltol=0.01,
+        name="maximize_expected_completed_deliveries",
     )
     model.setObjectiveN(
         gp.quicksum(
@@ -408,6 +474,29 @@ def _solve_network_model(
             # Gurobi does not expose MIPGap for every multi-objective solve,
             # including small models solved entirely during presolve.
             mip_gap=_optional_float_attribute(model, "MIPGap"),
+            expected_completed_deliveries=sum(
+                item.route.acceptance_probability for item in assignments
+            ),
+            route_distance_miles=sum(
+                item.route.route_distance_miles for item in assignments
+            ),
+            estimated_food_kg=sum(
+                item.route.estimated_food_kg for item in assignments
+            ),
+            usable_food_kg=sum(item.route.usable_food_kg for item in assignments),
+            avoided_system_kg_co2e=sum(
+                item.route.avoided_system_kg_co2e for item in assignments
+            ),
+            transport_kg_co2e=sum(
+                item.route.transport_kg_co2e for item in assignments
+            ),
+            residual_waste_kg_co2e=sum(
+                item.route.residual_waste_kg_co2e for item in assignments
+            ),
+            net_environmental_benefit_kg_co2e=sum(
+                item.route.net_environmental_benefit_kg_co2e
+                for item in assignments
+            ),
         ),
     )
 
@@ -471,6 +560,7 @@ def _assignment_candidates(
     weights: OptimizationWeights,
     pickup_service_minutes: int,
     dropoff_service_minutes: int,
+    environmental_assumptions: EnvironmentalAssumptions,
 ) -> list[AssignmentCandidate]:
     result: list[AssignmentCandidate] = []
     for request_index, request in enumerate(requests):
@@ -486,6 +576,7 @@ def _assignment_candidates(
                 weights,
                 pickup_service_minutes,
                 dropoff_service_minutes,
+                environmental_assumptions,
             )
             if route is not None:
                 request_routes.append(route)
@@ -505,7 +596,14 @@ def _greedy_assignment(candidates: list[AssignmentCandidate]) -> list[Assignment
     used_requests: set[str] = set()
     used_drivers: set[str] = set()
     used_pickups: set[str] = set()
-    for candidate in sorted(candidates, key=lambda item: -item.route.score):
+    for candidate in sorted(
+        candidates,
+        key=lambda item: (
+            -item.route.acceptance_probability,
+            -item.route.score,
+            item.route.finish_at,
+        ),
+    ):
         if (
             candidate.request_id in used_requests
             or candidate.driver_id in used_drivers
@@ -713,6 +811,7 @@ def _candidate(
     weights: OptimizationWeights,
     pickup_service_minutes: int,
     dropoff_service_minutes: int,
+    environmental_assumptions: EnvironmentalAssumptions,
 ) -> RouteCandidate | None:
     if pickup.claimed:
         return None
@@ -803,7 +902,29 @@ def _candidate(
         if request.preferred_destination is not None
         else 0.0
     )
-    score = weights.pantry_priority_reward * pantry.priority_score + timing_score(best)
+    route_distance_miles = _haversine_miles(
+        request.start_location.latitude,
+        request.start_location.longitude,
+        pickup.location.latitude,
+        pickup.location.longitude,
+    ) + _haversine_miles(
+        pickup.location.latitude,
+        pickup.location.longitude,
+        pantry.location.latitude,
+        pantry.location.longitude,
+    )
+    environmental_impact = estimate_route_environmental_impact(
+        pickup,
+        route_distance_miles,
+        environmental_assumptions,
+    )
+    score = (
+        weights.pantry_priority_reward * pantry.priority_score
+        + timing_score(best)
+        - weights.route_mile_penalty * route_distance_miles
+        + weights.environmental_benefit_reward
+        * environmental_impact.net_environmental_benefit_kg_co2e
+    )
     return RouteCandidate(
         bakery_id=pickup.id,
         bakery_name=pickup.bakery_name,
@@ -828,6 +949,7 @@ def _candidate(
             origin_deviation_miles,
             destination_deviation_miles,
             0.0,
+            environmental_impact.net_environmental_benefit_kg_co2e,
         ),
         facility_waiting_minutes=float(best["facility_waiting_minutes"]),
         requested_time_deviation_minutes=float(best["requested_time_deviation_minutes"]),
@@ -836,6 +958,15 @@ def _candidate(
         within_preferred_window=bool(best["within_preferred_window"]),
         origin_deviation_miles=origin_deviation_miles,
         destination_deviation_miles=destination_deviation_miles,
+        route_distance_miles=route_distance_miles,
+        estimated_food_kg=environmental_impact.estimated_food_kg,
+        usable_food_kg=environmental_impact.usable_food_kg,
+        avoided_system_kg_co2e=environmental_impact.avoided_system_kg_co2e,
+        transport_kg_co2e=environmental_impact.transport_kg_co2e,
+        residual_waste_kg_co2e=environmental_impact.residual_waste_kg_co2e,
+        net_environmental_benefit_kg_co2e=(
+            environmental_impact.net_environmental_benefit_kg_co2e
+        ),
     )
 
 
@@ -902,6 +1033,7 @@ def _explanation(
     origin_deviation_miles: float,
     destination_deviation_miles: float,
     normalized_spatial_deviation: float,
+    net_environmental_benefit_kg_co2e: float,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     if requested_time_deviation_minutes <= 0.01:
@@ -910,6 +1042,10 @@ def _explanation(
         reasons.append("Serves a higher-priority pantry")
     if drive_minutes <= 30:
         reasons.append("Short total driving time")
+    if net_environmental_benefit_kg_co2e > 0:
+        reasons.append(
+            f"Estimated net lifecycle benefit: {net_environmental_benefit_kg_co2e:.1f} kg CO2e avoided"
+        )
     if origin_deviation_miles <= 0.01:
         reasons.append("Bakery is inside the requested starting ZIP area")
     else:
@@ -982,7 +1118,7 @@ def _normalize_spatial_deviation(
         component_count = 2 if has_destination else 1
         spatial_ratio = (origin_ratio + destination_ratio) / component_count
         score = route.score - weights.spatial_deviation_ratio_penalty * spatial_ratio
-        normalized.append(replace(
+        updated = replace(
             route,
             score=score,
             normalized_origin_deviation=origin_ratio,
@@ -996,6 +1132,35 @@ def _normalize_spatial_deviation(
                 route.origin_deviation_miles,
                 route.destination_deviation_miles,
                 spatial_ratio,
+                route.net_environmental_benefit_kg_co2e,
             ),
+        )
+        normalized.append(replace(
+            updated,
+            acceptance_probability=estimate_acceptance_probability(updated),
         ))
     return normalized
+
+
+def estimate_acceptance_probability(
+    route: RouteCandidate,
+    model: ParticipationModel = ParticipationModel(),
+) -> float:
+    """Estimate route acceptance for an academic simulation scenario.
+
+    The logistic form is deliberately inspectable.  Longer driving, a larger
+    proportional miss of the requested time interval, and a larger normalized
+    miss of the requested start/destination areas all reduce acceptance.  The
+    output is bounded away from zero and one for numerically stable experiments.
+    """
+
+    logit = (
+        model.intercept
+        - model.drive_minute_penalty * route.drive_minutes
+        - model.requested_time_deviation_ratio_penalty
+        * route.requested_time_deviation_ratio
+        - model.spatial_deviation_ratio_penalty
+        * route.normalized_spatial_deviation
+    )
+    probability = 1.0 / (1.0 + math.exp(-logit))
+    return min(0.98, max(0.02, probability))
