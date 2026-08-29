@@ -92,6 +92,13 @@ models make different earlier selections.
   and the existing fixed direct-emissions coefficients. It does not use soft
   preferences, sigmoid acceptance, pantry fairness/priority/coverage, avoided
   production, packaging, meal-class, or unobserved driver-familiarity inputs.
+- **Horner et al. stochastic-menu adaptation:** a minimal implementation of
+  Horner, Pazour, and Mitchell's (2021) SLSF-noZ strategy. It optimizes menus
+  of at most five routes over 100 seeded willingness scenarios, maximizes
+  expected completed pickups, and uses expected distance only as a tie-break.
+  Drivers signal willingness for menu options and the platform assigns one
+  willing route in the recourse stage. The model uses the existing sigmoid but
+  does not use food, fairness, priority, or CO₂e in menu construction.
 - **Random feasible:** selects a seeded random conflict-free assignment.
 - **Shortest route:** greedily minimizes driving time.
 - **Earliest deadline:** greedily serves the bakery pickup with the earliest
@@ -115,7 +122,9 @@ decision-epoch trace therefore shows both the complete recommendation list a
 driver received and the highest-scoring route they selected. When a policy
 directly assigns a route rather than offering a choice menu, as in the Nair et
 al. and Xue-Zou adaptations, the assigned route itself is recorded as the
-driver's selection.
+driver's selection. The Horner adaptation is a third case: it displays an
+optimized menu, drivers signal willingness for any acceptable options, and the
+platform's recourse assignment is recorded as the final selection.
 
 ## Synthetic driver acceptance
 
@@ -184,7 +193,8 @@ trivial case in which every policy makes the same assignment.
 The bundled five-day public replay contains nine fictional bakeries, nine
 fictional pantries, and no more than three drivers entering one decision epoch.
 Its public table compares BakedBoston with the Nair et al. distance-first
-adaptation and the Xue-Zou Total-Curb adaptation. The older transparent
+adaptation, the Xue-Zou Total-Curb adaptation, and the Horner et al.
+stochastic-menu adaptation. The older transparent
 heuristics remain available to the command-line experiment runner but are
 intentionally excluded from the current public comparison while research
 comparators are being revised.

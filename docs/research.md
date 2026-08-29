@@ -19,13 +19,14 @@ results.
 | Food-rescue scheduling and routing | Joint scheduling, assignment, pickup-and-delivery routing, cost, and service levels | Timed driver–bakery–pantry route columns, hard pickup/receiving windows, one-use bakery occurrences | Adapted and implemented |
 | Nair et al. (2018) comparison model | Mandatory food-rescue service followed by transportation-cost minimization | Public comparator maximizes assigned food-ready pickups, then minimizes miles using current volunteer origins and hard timing feasibility | Distance-first adaptation implemented; not a full PU-PDVRP/Tabu Search replication |
 | Xue and Zou (2025) comparison model | Total-Curb open pickup-and-delivery routing minimizes order, waste, and vehicle emissions | Public comparator maximizes assigned food-ready pickups, then minimizes the existing direct system CO₂e ledger | Total-Curb objective adapted and implemented; not a multi-order AINS or driver-familiarity replication |
+| Horner, Pazour, and Mitchell (2021) comparison model | Personalized driver menus optimized under stochastic willingness with final recourse assignment | Public comparator uses 100 seeded willingness scenarios, menus of at most five routes, and SLSF-noZ expected-service optimization | Stochastic-menu strategy adapted and implemented; no unsupported compensation or unhappy-driver penalty |
 | Pickup-and-delivery routing | Exact network formulations for compatible pickup and delivery movements | Binary route-column variables with driver and bakery exclusivity | Adapted and implemented |
 | Equitable charitable distribution | Equity and service continuity alongside travel efficiency | Opportunity-based pantry priority, coverage, never-served share, Gini coefficient, and service gap | Adapted and implemented |
 | Online routing with occasional drivers | Rolling decisions instead of one static fleet plan | Seeded driver-arrival epochs and re-optimization over pickups still available | Adapted and implemented |
-| Driver menu choice | A feasible offer may not be selected; menu composition affects participation | Transparent synthetic acceptance probability in the expected-completion objective and conflict-free recommendation traces | Adapted and implemented with synthetic parameters |
+| Driver menu choice | A feasible offer may not be selected; menu composition affects participation | Transparent synthetic acceptance probability in BakedBoston plus SLSF-noZ stochastic menu optimization and recourse in the Horner comparator | Adapted and implemented with synthetic parameters |
 | Driver satisfaction | Preference satisfaction trades off with traditional efficiency | Soft requested-time and ZIP-area deviation penalties | Adapted and implemented |
 | Comparative food-redistribution LCA | Route distance is only one part of environmental performance; food quality, avoided production/disposal, sorting, and redistribution waste can dominate | Explicit route-level ledger for avoided food-system emissions, vehicle emissions, and residual redistribution waste | Adapted and implemented as declared scenario accounting |
-| Robust/stochastic optimization | Uncertain supply, attendance, and behavior should be tested across scenarios | Reproducible seeded surplus, staffed attendance, arrivals, and accept/reject events | Scenario simulation only; no robust counterpart |
+| Robust/stochastic optimization | Uncertain supply, attendance, and behavior should be tested across scenarios | Reproducible seeded exogenous events plus 100-scenario SAA driver willingness in the Horner comparator | Stochastic driver-menu comparator implemented; no robust counterpart |
 | Anticipatory dynamic routing | Future demand and volunteers can be anticipated | Current rolling horizon uses the observed synthetic state only | Future work; no Monte Carlo tree search |
 | Large-scale route generation | Column generation can avoid full enumeration | Small academic instances enumerate useful timed columns directly | Future scaling path |
 | Learned preferences | Historical choices can estimate heterogeneous driver preferences | Shared, transparent scenario coefficients | Future work requiring consented choice data |
@@ -64,6 +65,19 @@ results.
   paper's packaging, meal-class, arc-familiarity, or multi-stop inputs and does
   not claim to reproduce the AINS heuristic. See
   [comparison-models.md](comparison-models.md) for the adapted equations.
+
+### Stochastic driver menus
+
+- Horner, Pazour, and Mitchell (2021), “Optimizing driver menus under
+  stochastic selection behavior for ridesharing and crowdsourced delivery,”
+  *Transportation Research Part E*, 153, 102419.
+  [doi:10.1016/j.tre.2021.102419](https://doi.org/10.1016/j.tre.2021.102419).
+  Their model optimizes personalized request menus before uncertain driver
+  willingness is known and then assigns requests in a recourse stage. The
+  BakedBoston comparator preserves this three-stage strategy using the existing
+  sigmoid as willingness probability and the paper's SLSF-noZ variant. It does
+  not invent fare, wage, compensation, or dissatisfaction-history data. See
+  [comparison-models.md](comparison-models.md) for the exact adaptation.
 
 ### Fairness and charitable distribution
 

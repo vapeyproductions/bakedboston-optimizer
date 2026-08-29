@@ -19,6 +19,7 @@ from bakedboston_optimizer.optimizer import (
     _normalize_spatial_deviation,
     allocate_recommendation_layer,
     optimize_assignment_candidates,
+    optimize_horner_slsf_noz_candidates,
     optimize_nair_distance_first_candidates,
     optimize_network,
     optimize_xue_zou_total_curb_candidates,
@@ -320,6 +321,82 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(result.diagnostics.matched_count, 1)
         self.assertEqual(result.assignments[0].route.bakery_id, "b2")
         self.assertAlmostEqual(result.diagnostics.route_distance_miles, 3)
+
+    def test_horner_slsf_noz_builds_menu_then_assigns_only_willing_routes(self) -> None:
+        candidates = [
+            replace(
+                self.assignment("r1", "d1", "b1", "p1", 100, 0.5),
+                route=replace(
+                    self.assignment("r1", "d1", "b1", "p1", 100, 0.5).route,
+                    route_distance_miles=1,
+                ),
+            ),
+            replace(
+                self.assignment("r1", "d1", "b2", "p1", -100, 0.5),
+                route=replace(
+                    self.assignment("r1", "d1", "b2", "p1", -100, 0.5).route,
+                    route_distance_miles=4,
+                ),
+            ),
+            replace(
+                self.assignment("r2", "d2", "b1", "p1", -100, 0.5),
+                route=replace(
+                    self.assignment("r2", "d2", "b1", "p1", -100, 0.5).route,
+                    route_distance_miles=4,
+                ),
+            ),
+            replace(
+                self.assignment("r2", "d2", "b2", "p1", 100, 0.5),
+                route=replace(
+                    self.assignment("r2", "d2", "b2", "p1", 100, 0.5).route,
+                    route_distance_miles=1,
+                ),
+            ),
+        ]
+        realized_willingness = {
+            ("r1", "b1", "p1"): False,
+            ("r1", "b2", "p1"): True,
+            ("r2", "b1", "p1"): True,
+            ("r2", "b2", "p1"): False,
+        }
+
+        result = optimize_horner_slsf_noz_candidates(
+            candidates,
+            scenario_seed=17,
+            realized_willingness=realized_willingness,
+        )
+
+        self.assertEqual(result.diagnostics.training_scenario_count, 100)
+        self.assertLessEqual(result.diagnostics.menu_size, 10)
+        self.assertTrue(all(
+            realized_willingness[
+                (item.request_id, item.route.bakery_id, item.route.pantry_id)
+            ]
+            for item in result.assignments
+        ))
+        self.assertEqual(
+            {(item.request_id, item.route.bakery_id) for item in result.assignments},
+            {("r1", "b2"), ("r2", "b1")},
+        )
+        self.assertEqual(result.diagnostics.willing_menu_options, 2)
+        self.assertEqual(result.diagnostics.unhappy_driver_count, 0)
+
+    def test_horner_menu_contains_one_destination_per_driver_pickup(self) -> None:
+        candidates = [
+            self.assignment("r1", "d1", "b1", "p1", 1, 0.7),
+            self.assignment("r1", "d1", "b1", "p2", 1, 0.7),
+        ]
+        result = optimize_horner_slsf_noz_candidates(
+            candidates,
+            scenario_seed=23,
+            realized_willingness={
+                ("r1", "b1", "p1"): True,
+                ("r1", "b1", "p2"): True,
+            },
+        )
+
+        self.assertEqual(len(result.recommendations), 1)
+        self.assertEqual(result.diagnostics.menu_driver_count, 1)
 
     def test_nair_adaptation_protects_cardinality_before_distance(self) -> None:
         candidates = [

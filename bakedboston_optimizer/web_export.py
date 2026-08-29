@@ -108,6 +108,39 @@ POLICY_METADATA = {
             "unobserved driver familiarity",
         ],
     },
+    "horner_2021_slsf_noz": {
+        "label": "Horner et al. stochastic-menu adaptation",
+        "description": (
+            "A minimal adaptation of the 2021 SLSF-noZ model: optimize short "
+            "personalized menus over seeded stochastic willingness scenarios, "
+            "then assign among routes drivers are willing to fulfill."
+        ),
+        "selectionMode": "direct_assignment",
+        "selectionDescription": (
+            "The driver signals willingness for any acceptable menu options; "
+            "the platform's recourse solve assigns one willing route, which is "
+            "recorded as the driver's selection."
+        ),
+        "objective": (
+            "Maximize expected completed food-ready pickups over 100 seeded "
+            "willingness scenarios, then minimize expected route distance as a tie-break."
+        ),
+        "inputsUsed": [
+            "current driver location as route origin",
+            "hard search horizon",
+            "bakery and pantry availability windows",
+            "existing sigmoid acceptance probability",
+            "100 seeded SAA willingness scenarios",
+            "route distance as an exact-service tie-break",
+        ],
+        "inputsExcluded": [
+            "food quantity and pantry distribution as objectives",
+            "pantry fairness, priority, and coverage",
+            "CO2e as an objective",
+            "fare, compensation, and wage assumptions",
+            "unobserved unhappy-driver penalty history",
+        ],
+    },
     "random_feasible": {
         "label": "Random feasible",
         "description": "Chooses randomly from routes that satisfy the same timing constraints.",
@@ -135,6 +168,7 @@ PUBLIC_COMPARISON_POLICIES: tuple[RoutingPolicy, ...] = (
     RoutingPolicy.BAKEDBOSTON_MIP,
     RoutingPolicy.NAIR_2018_DISTANCE_FIRST,
     RoutingPolicy.XUE_ZOU_2025_TOTAL_CURB,
+    RoutingPolicy.HORNER_2021_SLSF_NOZ,
 )
 
 
@@ -210,7 +244,10 @@ def _compact_comparison(payload: dict[str, Any]) -> dict[str, Any]:
 
     compact_results = []
     for result in payload["results"]:
-        include_trace = result["policy"] == "bakedboston_mip"
+        include_trace = result["policy"] in {
+            "bakedboston_mip",
+            "horner_2021_slsf_noz",
+        }
         compact_results.append({
             "policy": result["policy"],
             "metrics": result["metrics"],
@@ -320,9 +357,11 @@ def build_web_payload(
         },
         "metricMethodology": {
             "actualSelection": (
-                "When a model offers a route menu, the simulated driver selects rank 1, "
-                "the highest-scoring route. When a model directly assigns a route, that "
-                "assigned route is recorded as the driver's selection."
+                "For BakedBoston's route-choice menu, the simulated driver selects rank 1, "
+                "the highest-scoring route. The Horner adaptation instead follows its source "
+                "formulation: drivers signal willingness for menu options and the platform "
+                "makes the final recourse assignment. For other direct-assignment models, "
+                "the assigned route is recorded as the driver's selection."
             ),
             "acceptanceModel": (
                 "Expected acceptance and likely-rejection measures are prediction-based diagnostics; "

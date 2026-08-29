@@ -191,6 +191,95 @@ existing fixed direct-emissions coefficients. It does **not** use:
 The assigned route is recorded as the driver's selection. The model does not
 construct a driver-choice menu.
 
+## Horner, Pazour, and Mitchell (2021) stochastic-menu adaptation
+
+### Source formulation
+
+Horner, Pazour, and Mitchell formulate a three-stage stochastic platform
+problem. First the platform creates a short personalized menu for every driver.
+Drivers then signal which menu requests they are willing to fulfill. Finally,
+the platform makes a recourse assignment among willing driver-request pairs.
+Their Single-Level Stochastic Formulation (SLSF) uses Sample Average
+Approximation (SAA) to optimize expected platform utility under uncertain
+driver willingness. Their SLSF-noZ variant removes penalties for drivers who
+are willing to participate but receive no final assignment.
+
+Reference: Horner, H., Pazour, J., and Mitchell, J. E. (2021), “Optimizing
+driver menus under stochastic selection behavior for ridesharing and
+crowdsourced delivery,” *Transportation Research Part E*, 153, 102419.
+[doi:10.1016/j.tre.2021.102419](https://doi.org/10.1016/j.tre.2021.102419).
+
+### Necessary platform adaptation
+
+BakedBoston does not observe driver compensation, fares, or a history of
+drivers accepting requests and receiving no assignment. Assigning a numerical
+unhappy-driver penalty would therefore introduce unsupported data. The public
+comparator uses the paper's SLSF-noZ variant, which preserves its central
+stochastic-menu and recourse strategy without inventing that penalty.
+
+Let \(R\) be the shared set of feasible driver–bakery–pantry route candidates,
+\(S\) a set of 100 deterministically seeded SAA willingness scenarios, and
+\(p_r\) the existing sigmoid willingness estimate for candidate \(r\). For
+scenario \(s\), \(\hat y_{rs}\) is a seeded Bernoulli draw with parameter
+\(p_r\). The decision variables are:
+
+- \(x_r=1\) when route \(r\) appears in its driver's menu; and
+- \(v_{rs}=1\) when route \(r\) is assigned in scenario \(s\).
+
+The first objective maximizes expected completed pickups:
+
+\[
+\max \frac{1}{|S|}\sum_{s\in S}\sum_{r\in R}v_{rs}.
+\]
+
+Expected route distance is minimized only as a lexicographic tie-break among
+solutions with the same expected service:
+
+\[
+\min \frac{1}{|S|}\sum_{s\in S}\sum_{r\in R}m_rv_{rs}.
+\]
+
+The adapted constraints include:
+
+\[
+\sum_{r\in R(d)}x_r\le 5 \quad \forall d,
+\]
+
+\[
+v_{rs}\le x_r,\qquad v_{rs}\le \hat y_{rs}
+\quad \forall r,s,
+\]
+
+\[
+\sum_{r\in R(d)}v_{rs}\le1 \quad \forall d,s,
+\]
+
+and
+
+\[
+\sum_{r\in R(b)}v_{rs}\le1 \quad \forall b,s.
+\]
+
+A driver's menu cannot contain two pantry destinations for the same physical
+bakery pickup. The same bakery may appear in different drivers' menus, as in
+the source model, because the final recourse stage resolves overlap. Open
+pantries remain nonexclusive.
+
+At execution time the same seeded willingness outcome is available for every
+candidate regardless of policy. The Horner comparator exposes its optimized
+menu, records willingness for menu options, and makes a maximum-service,
+minimum-distance final assignment among willing options. This is a direct
+recourse assignment, not a rank-one driver choice. Public deterministic replay
+disables Bernoulli removal for every model but retains \(p_r\) in the Horner
+training scenarios and reports expected/likely acceptance diagnostics.
+
+The comparator uses the sigmoid's existing drive, requested-time, and spatial
+fit inputs. It does **not** use food quantity, pantry distribution, fairness,
+priority, coverage, or CO₂e to construct menus. Those outcomes are measured by
+the shared evaluator after assignment. Production solves the formulation with
+Gurobi. A clearly labeled development heuristic is used only when a local
+size-limited Gurobi license cannot hold the 100-scenario model.
+
 ## Shared evaluation
 
 For every completed route from bakery \(b\) to pantry \(p\) on day \(d\), food
@@ -202,7 +291,7 @@ H_{bpd}=Q_{bd}U_{bd}D_p.
 
 Food wasted is the sum of all uncollected bakery food and the collected route
 remainder \(Q_{bd}-H_{bpd}\). Environmental reporting applies the same fixed
-landfill/pig-farm/compost and tonne-kilometre coefficients to all three models and
+landfill/pig-farm/compost and tonne-kilometre coefficients to all four models and
 reports transportation CO₂e, net waste-pathway CO₂e, their total direct CO₂e,
 and net environmental benefit.
 

@@ -23,6 +23,7 @@ from .models import (
     BakeryPickup,
     DriverRequest,
     Location,
+    NetworkOptimizationResult,
     Pantry,
     SolverDiagnostics,
 )
@@ -36,6 +37,7 @@ from .optimizer import (
     enumerate_assignment_candidates,
     estimate_acceptance_probability,
     optimize_assignment_candidates,
+    optimize_horner_slsf_noz_candidates,
     optimize_nair_distance_first_candidates,
     optimize_xue_zou_total_curb_candidates,
     solver_version,
@@ -58,6 +60,7 @@ class RoutingPolicy(StrEnum):
     BAKEDBOSTON_MIP = "bakedboston_mip"
     NAIR_2018_DISTANCE_FIRST = "nair_2018_distance_first"
     XUE_ZOU_2025_TOTAL_CURB = "xue_zou_2025_total_curb"
+    HORNER_2021_SLSF_NOZ = "horner_2021_slsf_noz"
     RANDOM_FEASIBLE = "random_feasible"
     SHORTEST_ROUTE = "shortest_route"
     EARLIEST_DEADLINE = "earliest_deadline"
@@ -557,8 +560,15 @@ class PolicyReport:
         available_pantry_count = len(pantry_counts)
         unique_pantries_served = len({item.pantry_name for item in completed})
         service_gap = (max(pantry_counts) - min(pantry_counts)) if pantry_counts else 0
-        runtimes = [run.runtime_seconds for day in self.days for run in day.solver_runs]
-        gaps = [run.mip_gap for day in self.days for run in day.solver_runs if run.mip_gap is not None]
+        solver_runs = [run for day in self.days for run in day.solver_runs]
+        runtimes = [run.runtime_seconds for run in solver_runs]
+        gaps = [run.mip_gap for run in solver_runs if run.mip_gap is not None]
+        menu_options = sum(run.menu_size for run in solver_runs)
+        menu_drivers = sum(run.menu_driver_count for run in solver_runs)
+        willing_menu_options = sum(
+            run.willing_menu_options for run in solver_runs
+        )
+        unhappy_drivers = sum(run.unhappy_driver_count for run in solver_runs)
         expected_acceptances = sum(item.acceptance_probability for item in offers)
         likely_rejections = sum(item.acceptance_probability < 0.5 for item in offers)
         likely_acceptances = len(offers) - likely_rejections
@@ -711,6 +721,15 @@ class PolicyReport:
             "averageSolverRuntimeSeconds": _mean(runtimes, digits=6),
             "averageOptimalityGap": _mean(gaps, digits=6) if gaps else None,
             "maximumMipGap": round(max(gaps), 6) if gaps else None,
+            "menuOptionsOffered": menu_options,
+            "averageMenuSize": round(menu_options / menu_drivers, 3)
+            if menu_drivers else 0.0,
+            "willingMenuOptions": willing_menu_options,
+            "willingMenuOptionRate": _ratio(
+                willing_menu_options,
+                menu_options,
+            ),
+            "unhappyDrivers": unhappy_drivers,
         }
 
     def as_dict(self) -> dict[str, Any]:
@@ -906,37 +925,51 @@ def run_policy(
                 for candidate in candidates
             ]
             candidate_count += len(candidates)
-            selected, diagnostic = _select_assignments(
-                policy,
-                candidates,
-                available_pickups,
-                scenario.config.simulation.random_seed,
-                epoch,
-                weights,
-            )
-            diagnostics.append(diagnostic)
-            selected_keys = {_candidate_key(candidate) for candidate in selected}
-            recommendation_ranks = _recommendation_ranks(
-                policy,
-                candidates,
-                selected,
-                available_pickups,
-                scenario.config.simulation.random_seed,
-                epoch,
-            )
-            acceptance_by_key: dict[tuple[str, str, str], bool] = {}
-            for candidate in selected:
-                probability = acceptance_probability(candidate, scenario.config)
-                accepted = (
-                    True if not scenario.config.acceptance_enabled
+            realized_willingness = {
+                _candidate_key(candidate): (
+                    True
+                    if not scenario.config.acceptance_enabled
                     else _stable_uniform(
                         scenario.config.simulation.random_seed,
                         "acceptance",
                         candidate.request_id,
                         candidate.route.bakery_id,
                         candidate.route.pantry_id,
-                    ) < probability
+                    ) < acceptance_probability(candidate, scenario.config)
                 )
+                for candidate in candidates
+            }
+            selection = _select_assignments(
+                policy,
+                candidates,
+                available_pickups,
+                scenario.config.simulation.random_seed,
+                epoch,
+                weights,
+                realized_willingness,
+            )
+            selected = selection.assignments
+            diagnostic = selection.diagnostics
+            diagnostics.append(diagnostic)
+            selected_keys = {_candidate_key(candidate) for candidate in selected}
+            if policy == RoutingPolicy.HORNER_2021_SLSF_NOZ:
+                recommendation_ranks = _paper_menu_ranks(
+                    selection.recommendations
+                )
+            else:
+                recommendation_ranks = _recommendation_ranks(
+                    policy,
+                    candidates,
+                    selected,
+                    available_pickups,
+                    scenario.config.simulation.random_seed,
+                    epoch,
+                )
+            recommendation_keys = set(recommendation_ranks)
+            acceptance_by_key: dict[tuple[str, str, str], bool] = {}
+            for candidate in selected:
+                probability = acceptance_probability(candidate, scenario.config)
+                accepted = realized_willingness[_candidate_key(candidate)]
                 offers.append(_experiment_assignment(
                     day.service_date,
                     epoch,
@@ -970,7 +1003,14 @@ def run_policy(
                             _candidate_key(candidate)
                         ),
                         selected=_candidate_key(candidate) in selected_keys,
-                        accepted=acceptance_by_key.get(_candidate_key(candidate)),
+                        accepted=(
+                            realized_willingness[_candidate_key(candidate)]
+                            if (
+                                policy == RoutingPolicy.HORNER_2021_SLSF_NOZ
+                                and _candidate_key(candidate) in recommendation_keys
+                            )
+                            else acceptance_by_key.get(_candidate_key(candidate))
+                        ),
                     )
                     for candidate in candidates
                 ),
@@ -1341,48 +1381,61 @@ def _select_assignments(
     seed: int,
     epoch: datetime,
     weights: OptimizationWeights,
-) -> tuple[tuple[AssignmentCandidate, ...], SolverDiagnostics]:
+    realized_willingness: dict[tuple[str, str, str], bool],
+) -> NetworkOptimizationResult:
     if policy == RoutingPolicy.BAKEDBOSTON_MIP:
-        result = optimize_assignment_candidates(tuple(candidates), weights=weights)
-        return result.assignments, result.diagnostics
+        return optimize_assignment_candidates(tuple(candidates), weights=weights)
     if policy == RoutingPolicy.NAIR_2018_DISTANCE_FIRST:
-        result = optimize_nair_distance_first_candidates(tuple(candidates))
-        return result.assignments, result.diagnostics
+        return optimize_nair_distance_first_candidates(tuple(candidates))
     if policy == RoutingPolicy.XUE_ZOU_2025_TOTAL_CURB:
-        result = optimize_xue_zou_total_curb_candidates(tuple(candidates))
-        return result.assignments, result.diagnostics
+        return optimize_xue_zou_total_curb_candidates(tuple(candidates))
+    if policy == RoutingPolicy.HORNER_2021_SLSF_NOZ:
+        return optimize_horner_slsf_noz_candidates(
+            tuple(candidates),
+            scenario_seed=_stable_integer(
+                seed,
+                "horner-saa",
+                epoch.isoformat(),
+            ),
+            realized_willingness=realized_willingness,
+        )
     started = clock.perf_counter()
     key = _policy_sort_key(policy, pickups, seed, epoch)
     selected = _greedy_select(candidates, key)
     runtime = clock.perf_counter() - started
-    return selected, SolverDiagnostics(
-        backend=f"baseline:{policy.value}",
-        status="complete",
-        candidate_count=len(candidates),
-        matched_count=len(selected),
-        route_quality=balanced_objective_value(candidates, selected, weights),
-        runtime_seconds=runtime,
-        expected_completed_deliveries=sum(
-            item.route.acceptance_probability for item in selected
-        ),
-        route_distance_miles=sum(
-            item.route.route_distance_miles for item in selected
-        ),
-        estimated_food_kg=sum(item.route.estimated_food_kg for item in selected),
-        usable_food_kg=sum(item.route.usable_food_kg for item in selected),
-        food_saved_kg=sum(item.route.food_saved_kg for item in selected),
-        collected_not_distributed_kg=sum(item.route.collected_not_distributed_kg for item in selected),
-        avoided_system_kg_co2e=sum(
-            item.route.avoided_system_kg_co2e for item in selected
-        ),
-        transport_kg_co2e=sum(
-            item.route.transport_kg_co2e for item in selected
-        ),
-        residual_waste_kg_co2e=sum(
-            item.route.residual_waste_kg_co2e for item in selected
-        ),
-        net_environmental_benefit_kg_co2e=sum(
-            item.route.net_environmental_benefit_kg_co2e for item in selected
+    return NetworkOptimizationResult(
+        assignments=selected,
+        diagnostics=SolverDiagnostics(
+            backend=f"baseline:{policy.value}",
+            status="complete",
+            candidate_count=len(candidates),
+            matched_count=len(selected),
+            route_quality=balanced_objective_value(candidates, selected, weights),
+            runtime_seconds=runtime,
+            expected_completed_deliveries=sum(
+                item.route.acceptance_probability for item in selected
+            ),
+            route_distance_miles=sum(
+                item.route.route_distance_miles for item in selected
+            ),
+            estimated_food_kg=sum(item.route.estimated_food_kg for item in selected),
+            usable_food_kg=sum(item.route.usable_food_kg for item in selected),
+            food_saved_kg=sum(item.route.food_saved_kg for item in selected),
+            collected_not_distributed_kg=sum(
+                item.route.collected_not_distributed_kg for item in selected
+            ),
+            avoided_system_kg_co2e=sum(
+                item.route.avoided_system_kg_co2e for item in selected
+            ),
+            transport_kg_co2e=sum(
+                item.route.transport_kg_co2e for item in selected
+            ),
+            residual_waste_kg_co2e=sum(
+                item.route.residual_waste_kg_co2e for item in selected
+            ),
+            net_environmental_benefit_kg_co2e=sum(
+                item.route.net_environmental_benefit_kg_co2e for item in selected
+            ),
         ),
     )
 
@@ -1416,6 +1469,14 @@ def _policy_sort_key(
                 - item.route.residual_waste_kg_co2e
                 - item.route.transport_kg_co2e
             ),
+            item.route.finish_at,
+            item.route.bakery_id,
+            item.route.pantry_id,
+        )
+    if policy == RoutingPolicy.HORNER_2021_SLSF_NOZ:
+        return lambda item: (
+            -item.route.acceptance_probability,
+            item.route.route_distance_miles,
             item.route.finish_at,
             item.route.bakery_id,
             item.route.pantry_id,
@@ -1753,6 +1814,33 @@ def _recommendation_ranks(
     return ranks
 
 
+def _paper_menu_ranks(
+    recommendations: Sequence[AssignmentCandidate],
+) -> dict[tuple[str, str, str], int]:
+    """Give the paper-derived menu a stable display order, not a choice rule."""
+
+    ranks: dict[tuple[str, str, str], int] = {}
+    request_ids = sorted({item.request_id for item in recommendations})
+    for request_id in request_ids:
+        ordered = sorted(
+            (
+                item
+                for item in recommendations
+                if item.request_id == request_id
+            ),
+            key=lambda item: (
+                -item.route.acceptance_probability,
+                item.route.route_distance_miles,
+                item.route.finish_at,
+                item.route.bakery_id,
+                item.route.pantry_id,
+            ),
+        )
+        for rank, item in enumerate(ordered, start=1):
+            ranks[_candidate_key(item)] = rank
+    return ranks
+
+
 def _allocate_menu_layer(
     policy: RoutingPolicy,
     candidates: Sequence[AssignmentCandidate],
@@ -1810,6 +1898,11 @@ def _stable_uniform(seed: int, *parts: str) -> float:
     value = "|".join((str(seed), *parts)).encode("utf-8")
     integer = int.from_bytes(hashlib.sha256(value).digest()[:8], "big")
     return integer / float(2**64)
+
+
+def _stable_integer(seed: int, *parts: str) -> int:
+    value = "|".join((str(seed), *parts)).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(value).digest()[:8], "big")
 
 
 def _route_distance_miles(
@@ -1872,6 +1965,11 @@ def _solver_dict(diagnostics: SolverDiagnostics) -> dict[str, Any]:
         ),
         "runtimeSeconds": round(diagnostics.runtime_seconds, 6),
         "mipGap": diagnostics.mip_gap,
+        "menuSize": diagnostics.menu_size,
+        "menuDriverCount": diagnostics.menu_driver_count,
+        "willingMenuOptions": diagnostics.willing_menu_options,
+        "unhappyDriverCount": diagnostics.unhappy_driver_count,
+        "trainingScenarioCount": diagnostics.training_scenario_count,
     }
 
 

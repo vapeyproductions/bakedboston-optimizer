@@ -233,9 +233,15 @@ class SolverDiagnostics:
     transport_kg_co2e: float = 0.0
     residual_waste_kg_co2e: float = 0.0
     net_environmental_benefit_kg_co2e: float = 0.0
+    menu_size: int = 0
+    menu_driver_count: int = 0
+    willing_menu_options: int = 0
+    unhappy_driver_count: int = 0
+    training_scenario_count: int = 0
 
 
 @dataclass(frozen=True)
 class NetworkOptimizationResult:
     assignments: tuple[AssignmentCandidate, ...]
     diagnostics: SolverDiagnostics
+    recommendations: tuple[AssignmentCandidate, ...] = ()

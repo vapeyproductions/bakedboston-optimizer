@@ -6,6 +6,7 @@ from itertools import product
 import atexit
 import math
 import os
+import random
 from threading import RLock
 from typing import TYPE_CHECKING, Sequence
 
@@ -260,6 +261,408 @@ def optimize_assignment_candidates(
 
     with _SOLVER_LOCK:
         return _optimize_network_with_gurobi(candidate_list, weights)
+
+
+def optimize_horner_slsf_noz_candidates(
+    candidates: list[AssignmentCandidate] | tuple[AssignmentCandidate, ...],
+    *,
+    scenario_seed: int,
+    realized_willingness: dict[tuple[str, str, str], bool],
+    training_scenario_count: int = 100,
+    maximum_menu_size: int = 5,
+) -> NetworkOptimizationResult:
+    """Optimize stochastic driver menus using Horner et al.'s SLSF-noZ logic.
+
+    Candidate routes are the delivery-request analogue of the source paper's
+    requests. The first-stage ``x`` variables create personalized menus. For
+    each seeded SAA scenario, recourse variables assign only routes the driver
+    would be willing to fulfill. The platform first maximizes the average
+    number of completed food-ready pickups and then minimizes expected route
+    distance as a deterministic tie-breaker.
+
+    The noZ variant is deliberate: BakedBoston has no observed compensation or
+    dissatisfaction history with which to estimate the source paper's unhappy-
+    driver penalty. Food, fairness, and environmental values remain post-hoc
+    comparison metrics and do not enter this model's objective.
+    """
+
+    if training_scenario_count < 1:
+        raise ValueError("training_scenario_count must be at least 1")
+    if maximum_menu_size < 1:
+        raise ValueError("maximum_menu_size must be at least 1")
+
+    candidate_list = list(candidates)
+    backend_suffix = "horner_2021_slsf_noz_menu_adaptation"
+    if not candidate_list:
+        return NetworkOptimizationResult(
+            assignments=(),
+            recommendations=(),
+            diagnostics=SolverDiagnostics(
+                backend=(
+                    f"gurobi:{backend_suffix}"
+                    if gp is not None
+                    else f"unavailable:{backend_suffix}"
+                ),
+                status="no_feasible_assignments",
+                candidate_count=0,
+                matched_count=0,
+                route_quality=0.0,
+                runtime_seconds=0.0,
+                training_scenario_count=training_scenario_count,
+            ),
+        )
+
+    if gp is None:
+        if not _development_fallback_enabled():
+            raise GurobiUnavailableError(
+                "Gurobi is required, but gurobipy is not installed in the optimizer runtime."
+            )
+        recommendations = _horner_development_menu(
+            candidate_list,
+            maximum_menu_size=maximum_menu_size,
+        )
+        assignments = _horner_realized_recourse(
+            recommendations,
+            realized_willingness,
+        )
+        return NetworkOptimizationResult(
+            assignments=assignments,
+            recommendations=recommendations,
+            diagnostics=_horner_assignment_diagnostics(
+                candidate_list,
+                recommendations,
+                assignments,
+                realized_willingness,
+                backend=f"development_heuristic:{backend_suffix}",
+                status="fallback",
+                runtime_seconds=0.0,
+                route_quality=sum(
+                    item.route.acceptance_probability for item in assignments
+                ),
+                training_scenario_count=training_scenario_count,
+            ),
+        )
+
+    generator = random.Random(scenario_seed)
+    willingness_scenarios = tuple(
+        tuple(
+            generator.random()
+            < min(1.0, max(0.0, item.route.acceptance_probability))
+            for item in candidate_list
+        )
+        for _ in range(training_scenario_count)
+    )
+
+    with _SOLVER_LOCK:
+        model = _model(backend_suffix)
+        try:
+            menu_vars = {
+                index: model.addVar(vtype=GRB.BINARY, name=f"menu_{index}")
+                for index in range(len(candidate_list))
+            }
+            assignment_vars = {
+                (scenario_index, candidate_index): model.addVar(
+                    vtype=GRB.BINARY,
+                    name=f"assign_{scenario_index}_{candidate_index}",
+                )
+                for scenario_index in range(training_scenario_count)
+                for candidate_index in range(len(candidate_list))
+            }
+
+            for driver_id in sorted({item.driver_id for item in candidate_list}):
+                driver_indices = [
+                    index
+                    for index, item in enumerate(candidate_list)
+                    if item.driver_id == driver_id
+                ]
+                model.addConstr(
+                    gp.quicksum(menu_vars[index] for index in driver_indices)
+                    <= maximum_menu_size,
+                    name=f"driver_{_safe_name(driver_id)}_menu_size",
+                )
+                for pickup_id in sorted({
+                    candidate_list[index].route.bakery_id
+                    for index in driver_indices
+                }):
+                    model.addConstr(
+                        gp.quicksum(
+                            menu_vars[index]
+                            for index in driver_indices
+                            if candidate_list[index].route.bakery_id == pickup_id
+                        ) <= 1,
+                        name=(
+                            f"driver_{_safe_name(driver_id)}_pickup_"
+                            f"{_safe_name(pickup_id)}_one_menu_route"
+                        ),
+                    )
+
+            request_ids = sorted({item.request_id for item in candidate_list})
+            driver_ids = sorted({item.driver_id for item in candidate_list})
+            pickup_ids = sorted({
+                item.route.bakery_id for item in candidate_list
+            })
+            for scenario_index, scenario in enumerate(willingness_scenarios):
+                for candidate_index, willing in enumerate(scenario):
+                    model.addConstr(
+                        assignment_vars[scenario_index, candidate_index]
+                        <= menu_vars[candidate_index],
+                        name=f"scenario_{scenario_index}_menu_{candidate_index}",
+                    )
+                    if not willing:
+                        model.addConstr(
+                            assignment_vars[scenario_index, candidate_index] == 0,
+                            name=(
+                                f"scenario_{scenario_index}_unwilling_"
+                                f"{candidate_index}"
+                            ),
+                        )
+                for request_id in request_ids:
+                    model.addConstr(
+                        gp.quicksum(
+                            assignment_vars[scenario_index, index]
+                            for index, item in enumerate(candidate_list)
+                            if item.request_id == request_id
+                        ) <= 1,
+                        name=(
+                            f"scenario_{scenario_index}_request_"
+                            f"{_safe_name(request_id)}"
+                        ),
+                    )
+                for driver_id in driver_ids:
+                    model.addConstr(
+                        gp.quicksum(
+                            assignment_vars[scenario_index, index]
+                            for index, item in enumerate(candidate_list)
+                            if item.driver_id == driver_id
+                        ) <= 1,
+                        name=(
+                            f"scenario_{scenario_index}_driver_"
+                            f"{_safe_name(driver_id)}"
+                        ),
+                    )
+                for pickup_id in pickup_ids:
+                    model.addConstr(
+                        gp.quicksum(
+                            assignment_vars[scenario_index, index]
+                            for index, item in enumerate(candidate_list)
+                            if item.route.bakery_id == pickup_id
+                        ) <= 1,
+                        name=(
+                            f"scenario_{scenario_index}_pickup_"
+                            f"{_safe_name(pickup_id)}"
+                        ),
+                    )
+
+            model.ModelSense = GRB.MAXIMIZE
+            model.setObjectiveN(
+                gp.quicksum(assignment_vars.values())
+                / training_scenario_count,
+                index=0,
+                priority=2,
+                weight=1.0,
+                name="maximize_expected_completed_pickups",
+            )
+            model.setObjectiveN(
+                -gp.quicksum(
+                    candidate_list[candidate_index].route.route_distance_miles
+                    * assignment_vars[scenario_index, candidate_index]
+                    for scenario_index in range(training_scenario_count)
+                    for candidate_index in range(len(candidate_list))
+                ) / training_scenario_count,
+                index=1,
+                priority=1,
+                weight=1.0,
+                name="minimize_expected_route_distance_tiebreak",
+            )
+            try:
+                model.optimize()
+            except gp.GurobiError as error:
+                if "size-limited license" not in str(error).lower():
+                    raise
+                recommendations = _horner_development_menu(
+                    candidate_list,
+                    maximum_menu_size=maximum_menu_size,
+                )
+                assignments = _horner_realized_recourse(
+                    recommendations,
+                    realized_willingness,
+                )
+                return NetworkOptimizationResult(
+                    assignments=assignments,
+                    recommendations=recommendations,
+                    diagnostics=_horner_assignment_diagnostics(
+                        candidate_list,
+                        recommendations,
+                        assignments,
+                        realized_willingness,
+                        backend=f"development_size_limited_heuristic:{backend_suffix}",
+                        status="fallback_size_limited_license",
+                        runtime_seconds=0.0,
+                        route_quality=sum(
+                            item.route.acceptance_probability
+                            for item in assignments
+                        ),
+                        training_scenario_count=training_scenario_count,
+                    ),
+                )
+            if (
+                model.Status not in {GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.TIME_LIMIT}
+                or model.SolCount < 1
+            ):
+                raise RuntimeError(
+                    "Gurobi could not solve the Horner et al. SLSF-noZ menu "
+                    f"adaptation (status {model.Status})."
+                )
+
+            recommendations = tuple(
+                item
+                for index, item in enumerate(candidate_list)
+                if menu_vars[index].X > 0.5
+            )
+            assignments = _horner_realized_recourse(
+                recommendations,
+                realized_willingness,
+            )
+            expected_completed = sum(
+                assignment_vars[scenario_index, candidate_index].X
+                for scenario_index in range(training_scenario_count)
+                for candidate_index in range(len(candidate_list))
+            ) / training_scenario_count
+            return NetworkOptimizationResult(
+                assignments=assignments,
+                recommendations=recommendations,
+                diagnostics=_horner_assignment_diagnostics(
+                    candidate_list,
+                    recommendations,
+                    assignments,
+                    realized_willingness,
+                    backend=f"gurobi:{backend_suffix}",
+                    status=_status_name(model.Status),
+                    runtime_seconds=float(model.Runtime),
+                    route_quality=expected_completed,
+                    training_scenario_count=training_scenario_count,
+                    mip_gap=_optional_float_attribute(model, "MIPGap"),
+                ),
+            )
+        finally:
+            model.dispose()
+
+
+def _horner_development_menu(
+    candidates: Sequence[AssignmentCandidate],
+    *,
+    maximum_menu_size: int,
+) -> tuple[AssignmentCandidate, ...]:
+    """Deterministic development-only menu fallback when Gurobi is absent."""
+
+    recommendations: list[AssignmentCandidate] = []
+    for driver_id in sorted({item.driver_id for item in candidates}):
+        used_pickups: set[str] = set()
+        driver_candidates = sorted(
+            (item for item in candidates if item.driver_id == driver_id),
+            key=lambda item: (
+                -item.route.acceptance_probability,
+                item.route.route_distance_miles,
+                item.request_id,
+                item.route.bakery_id,
+                item.route.pantry_id,
+            ),
+        )
+        for item in driver_candidates:
+            if item.route.bakery_id in used_pickups:
+                continue
+            recommendations.append(item)
+            used_pickups.add(item.route.bakery_id)
+            if len(used_pickups) == maximum_menu_size:
+                break
+    return tuple(recommendations)
+
+
+def _horner_realized_recourse(
+    recommendations: Sequence[AssignmentCandidate],
+    realized_willingness: dict[tuple[str, str, str], bool],
+) -> tuple[AssignmentCandidate, ...]:
+    willing = [
+        item
+        for item in recommendations
+        if realized_willingness.get(_assignment_key(item), False)
+    ]
+    utilities = {
+        _assignment_key(item): -item.route.route_distance_miles
+        for item in willing
+    }
+    assignments = _exact_recommendation_layer(willing, utilities)
+    return tuple(sorted(
+        assignments,
+        key=lambda item: (
+            item.route.depart_at,
+            item.route.route_distance_miles,
+            item.request_id,
+            item.route.bakery_id,
+            item.route.pantry_id,
+        ),
+    ))
+
+
+def _horner_assignment_diagnostics(
+    candidates: Sequence[AssignmentCandidate],
+    recommendations: Sequence[AssignmentCandidate],
+    assignments: Sequence[AssignmentCandidate],
+    realized_willingness: dict[tuple[str, str, str], bool],
+    *,
+    backend: str,
+    status: str,
+    runtime_seconds: float,
+    route_quality: float,
+    training_scenario_count: int,
+    mip_gap: float | None = None,
+) -> SolverDiagnostics:
+    willing_recommendations = [
+        item
+        for item in recommendations
+        if realized_willingness.get(_assignment_key(item), False)
+    ]
+    willing_drivers = {item.driver_id for item in willing_recommendations}
+    assigned_drivers = {item.driver_id for item in assignments}
+    return SolverDiagnostics(
+        backend=backend,
+        status=status,
+        candidate_count=len(candidates),
+        matched_count=len(assignments),
+        route_quality=route_quality,
+        runtime_seconds=runtime_seconds,
+        mip_gap=mip_gap,
+        expected_completed_deliveries=sum(
+            item.route.acceptance_probability for item in assignments
+        ),
+        route_distance_miles=sum(
+            item.route.route_distance_miles for item in assignments
+        ),
+        estimated_food_kg=sum(item.route.estimated_food_kg for item in assignments),
+        usable_food_kg=sum(item.route.usable_food_kg for item in assignments),
+        food_saved_kg=sum(item.route.food_saved_kg for item in assignments),
+        collected_not_distributed_kg=sum(
+            item.route.collected_not_distributed_kg for item in assignments
+        ),
+        avoided_system_kg_co2e=sum(
+            item.route.avoided_system_kg_co2e for item in assignments
+        ),
+        transport_kg_co2e=sum(
+            item.route.transport_kg_co2e for item in assignments
+        ),
+        residual_waste_kg_co2e=sum(
+            item.route.residual_waste_kg_co2e for item in assignments
+        ),
+        net_environmental_benefit_kg_co2e=sum(
+            item.route.net_environmental_benefit_kg_co2e
+            for item in assignments
+        ),
+        menu_size=len(recommendations),
+        menu_driver_count=len({item.driver_id for item in recommendations}),
+        willing_menu_options=len(willing_recommendations),
+        unhappy_driver_count=len(willing_drivers - assigned_drivers),
+        training_scenario_count=training_scenario_count,
+    )
 
 
 def optimize_nair_distance_first_candidates(

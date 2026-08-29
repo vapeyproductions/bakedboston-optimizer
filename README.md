@@ -168,7 +168,8 @@ excluded merely for having received food.
 
 The public academic experiment compares BakedBoston with a distance-first
 adaptation of Nair, Rashidi, and Dixit's food-rescue pickup-and-delivery model
-and a Total-Curb adaptation of Xue and Zou's carbon-aware meal-delivery model
+and a Total-Curb adaptation of Xue and Zou's carbon-aware meal-delivery model,
+plus a stochastic-menu adaptation of Horner, Pazour, and Mitchell's SLSF-noZ model
 over identical five-day seeded scenarios. The bundled public replay uses nine
 fictional bakeries, nine fictional pantries, synthetic volunteer requests, and
 at most three drivers entering any one decision epoch:
@@ -195,7 +196,10 @@ into one network-wide Gurobi solve. The JSON contains the complete auditable
 event trace; the CSV contains one analysis-ready row per horizon and policy.
 
 The public policies are the BakedBoston Gurobi MIP, the Nair et al. (2018)
-distance-first adaptation, and the Xue-Zou (2025) Total-Curb adaptation. The
+distance-first adaptation, the Xue-Zou (2025) Total-Curb adaptation, and the
+Horner et al. (2021) stochastic-menu adaptation. The Horner comparator creates
+menus of at most five routes over 100 seeded willingness scenarios, then makes
+a final recourse assignment among routes drivers signal they would accept. The
 command-line runner also retains the older random, shortest-route,
 earliest-deadline, pantry-priority, and driver-fit heuristics for internal
 sensitivity work. Every model receives the same realized scenario and feasible
@@ -223,6 +227,10 @@ rescue routing is a new problem class:
   order, food-waste, and vehicle emissions in open pickup-and-delivery routing;
   the public Total-Curb adaptation isolates their total-emissions objective
   without inventing multi-stop routes or driver-familiarity observations.
+- [Horner, Pazour, and Mitchell (2021)](https://doi.org/10.1016/j.tre.2021.102419)
+  optimize personalized driver menus under stochastic willingness and make a
+  final recourse assignment. The public adaptation uses their SLSF-noZ variant
+  so no unsupported compensation or unhappy-driver penalty is introduced.
 - [Hernandez-Perez and Salazar-Gonzalez (2007)](https://doi.org/10.1002/net.20209)
   provide an exact formulation for the one-commodity pickup-and-delivery
   traveling-salesman problem, a useful structural ancestor for unpaired surplus

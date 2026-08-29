@@ -188,7 +188,7 @@ class ExperimentTests(unittest.TestCase):
                 self.assertEqual(len(pickup_ids), len(set(pickup_ids)))
                 self.assertEqual(len(driver_ids), len(set(driver_ids)))
 
-    def test_public_payload_compares_three_declared_academic_models(self) -> None:
+    def test_public_payload_compares_four_declared_academic_models(self) -> None:
         payload = build_web_payload(
             self.snapshot,
             start_date=date(2026, 8, 24),
@@ -205,6 +205,7 @@ class ExperimentTests(unittest.TestCase):
                 "bakedboston_mip",
                 "nair_2018_distance_first",
                 "xue_zou_2025_total_curb",
+                "horner_2021_slsf_noz",
             ],
         )
         self.assertEqual(
@@ -219,6 +220,24 @@ class ExperimentTests(unittest.TestCase):
             payload["policyMetadata"]["xue_zou_2025_total_curb"]["selectionMode"],
             "direct_assignment",
         )
+        self.assertEqual(
+            payload["policyMetadata"]["horner_2021_slsf_noz"]["selectionMode"],
+            "direct_assignment",
+        )
+        horner = next(
+            item
+            for item in payload["results"]
+            if item["policy"] == "horner_2021_slsf_noz"
+        )
+        self.assertGreater(horner["metrics"]["menuOptionsOffered"], 0)
+        self.assertGreater(horner["metrics"]["averageMenuSize"], 0)
+        self.assertIn("decisionEpochs", horner["days"][0])
+        self.assertTrue(any(
+            recommendation["routes"]
+            for day in horner["days"]
+            for epoch in day["decisionEpochs"]
+            for recommendation in epoch["driverRecommendations"]
+        ))
         for item in payload["results"]:
             self.assertTrue({
                 "foodSavedKg",
