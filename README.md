@@ -76,22 +76,46 @@ q_{d,b,p} = 45\,priority_p - driveMinutes_{d,b,p}
 + 1.5\,E_{d,b,p}
 \]
 
-Here \(E_{d,b,p}\) is the route's estimated net lifecycle climate benefit:
+Here \(E_{d,b,p}\) is a **signed net lifecycle climate benefit**, measured
+in kilograms of CO2-equivalent. The model first computes the food-saving
+benefit before transportation:
 
 \[
-E_r = m_r u_r e_{production}
+B_r^{food}
+= m_r u_r e_{production}
 + m_r e_{avoided\ disposal(h_b)}
-- miles_r e_{vehicle}
 - m_r(1-u_r)e_{residual\ waste}.
 \]
 
-The ledger rewards usable donated food for avoided production and credits the
-donor's avoided disposal pathway, then subtracts vehicle emissions and the
-burden of unusable food entering redistribution. Mileage is not penalized a
-second time in the quality score: driving minutes capture volunteer burden,
-while distance already contributes to the lifecycle term. Food mass, usable
-share, disposal pathway, and emissions factors are transparent academic
-scenario inputs—not measured bakery-specific emissions.
+It then nets that benefit directly against transportation emissions:
+
+\[
+E_r = B_r^{food} - miles_r e_{vehicle}.
+\]
+
+Because both sides use the same unit, this comparison is part of the algebra,
+not an added rule:
+
+- if \(B_r^{food} > miles_r e_{vehicle}\), then \(E_r>0\) and the route receives
+  an environmental reward;
+- if they are equal, then \(E_r=0\) and climate has no effect on that route's
+  score;
+- if \(B_r^{food} < miles_r e_{vehicle}\), then \(E_r<0\) and the route receives
+  an environmental penalty.
+
+The environmental term is deliberately not a hard feasibility constraint.
+Pantry equity, service priority, and volunteer fit can still make a route
+system-optimal even when its standalone climate balance is negative. Conversely,
+a large climate benefit cannot by itself erase every social or driver-burden
+consideration.
+
+The ledger credits usable donated food for avoided production and the donor's
+avoided disposal pathway, then subtracts residual redistribution waste and
+vehicle emissions. Mileage is not penalized a second time as carbon in the
+quality score: driving minutes capture volunteer burden, while distance already
+contributes to \(E_r\). Food mass, usable share, disposal pathway, and emissions
+factors are transparent academic scenario inputs—not measured bakery-specific
+emissions.
 
 Opening the app creates a decision epoch; it does not force immediate
 departure. The route generator chooses a just-in-time departure, includes 5
