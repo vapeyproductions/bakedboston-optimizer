@@ -30,6 +30,9 @@ class SimulationTests(unittest.TestCase):
                 "addressValidationStatus": "validated",
                 "latitude": 42.355,
                 "longitude": -71.065,
+                "foodAmountDistributionKg": {"minimum":10,"mode":12,"maximum":14},
+                "usableFractionDistribution": {"minimum":0.7,"mode":0.8,"maximum":0.9},
+                "wasteAllocation": {"landfill":0.5,"pigFarm":0.2,"compost":0.3},
                 "recurringDays": "Mon",
                 "readyTime": '{"Mon":"17:00"}',
                 "pickupDeadline": '{"Mon":"18:00"}',
@@ -43,6 +46,7 @@ class SimulationTests(unittest.TestCase):
                 "addressValidationStatus": "validated",
                 "latitude": 42.360,
                 "longitude": -71.060,
+                "distributionFraction": 0.75,
                 "recurringDays": "Mon",
                 "openTime": '[{"recurrence":"weekly","day":"Mon","time":"16:30"}]',
                 "closeTime": '[{"recurrence":"weekly","day":"Mon","time":"19:00"}]',
@@ -77,9 +81,11 @@ class SimulationTests(unittest.TestCase):
 
         self.assertEqual(len(pickups), 1)
         self.assertEqual(pickups[0].ready_at.hour, 17)
+        self.assertEqual(pickups[0].food_amount_distribution.mode, 12)
         self.assertEqual(len(pantries), 1)
         self.assertEqual(pantries[0][0].latest_permitted_arrival.minute, 45)
         self.assertEqual(pantries[0][1], "unattended")
+        self.assertEqual(pantries[0][0].distribution_fraction, 0.75)
 
     def test_seeded_simulation_produces_repeatable_assignments(self) -> None:
         config = SimulationConfig(
@@ -99,6 +105,11 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(first_assignments, second_assignments)
         self.assertEqual(first.metrics()["matchedPickups"], 1)
         self.assertEqual(first.metrics()["pickupCoverage"], 1.0)
+        assignment = first.days[0].assignments[0]
+        self.assertAlmostEqual(
+            assignment.food_saved_kg,
+            assignment.estimated_food_kg * assignment.bakery_usable_fraction * assignment.pantry_distribution_fraction,
+        )
         self.assertEqual(first.as_dict()["mode"], "academic_schedule_simulation")
 
     def test_schedule_exception_removes_that_days_occurrences(self) -> None:

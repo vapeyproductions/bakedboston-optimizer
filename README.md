@@ -16,7 +16,8 @@ For each simulated day, the system:
 
 1. expands bakery and pantry schedules into time-specific occurrences;
 2. applies one-time windows, monthly rules, and schedule exceptions;
-3. samples hypothetical bakery surplus with a saved random seed;
+3. draws hypothetical bakery food amount and usability from each bakery's own
+   fixed triangular distributions with a saved random seed;
 4. treats unattended pantry windows as open and samples staff attendance for
    staffed windows;
 5. generates synthetic Boston-area volunteer-driver requests;
@@ -24,7 +25,8 @@ For each simulated day, the system:
 7. estimates each route's probability of volunteer acceptance with an explicit,
    synthetic participation model;
 8. asks Gurobi to maximize expected completed pickups and then, within 1% of
-   that optimum, maximize social and sustainable-logistics quality;
+   that optimum, maximize a normalized food, fairness, environmental, and
+   driver-fit objective;
 9. records the virtual timeline, assignments, solver diagnostics, and outcomes.
 
 Nothing in a simulation run writes to an organization record, creates an
@@ -67,55 +69,28 @@ is not useful if its burden makes a volunteer unlikely to accept it. The
 coefficients are reproducible academic assumptions and must not be presented as
 empirically calibrated until real choice data exist.
 
-Candidate quality is:
+For bakery \(b\), pantry \(p\), and simulated day \(d\), route food saved is:
 
 \[
-q_{d,b,p} = 45\,priority_p - driveMinutes_{d,b,p}
-- 24\,outsideWindowRatio_{d,b,p}
-- 18\,spatialDeviationRatio_{d,b,p}
-+ 1.5\,E_{d,b,p}
+H_{bpd}=Q_{bd}U_{bd}D_p.
 \]
 
-Here \(E_{d,b,p}\) is a **signed net lifecycle climate benefit**, measured
-in kilograms of CO2-equivalent. The model first computes the food-saving
-benefit before transportation:
+Food-available bakery occurrences with no completed pickup are recorded as
+uncollected bakery food. For a completed route, \(Q-H\) is collected food not
+ultimately distributed. Each bakery's fixed landfill, pig-farm, and compost mix
+values those two cases; tonne-kilometre transport emissions are then subtracted.
+Avoided production is held at zero in the primary score.
+
+The normalized second-stage objective is
 
 \[
-B_r^{food}
-= m_r u_r e_{production}
-+ m_r e_{avoided\ disposal(h_b)}
-- m_r(1-u_r)e_{residual\ waste}.
+10C+10V_Q+10F_Q+10V_H+10F_H+10P+20E+20D,
 \]
 
-It then nets that benefit directly against transportation emissions:
-
-\[
-E_r = B_r^{food} - miles_r e_{vehicle}.
-\]
-
-Because both sides use the same unit, this comparison is part of the algebra,
-not an added rule:
-
-- if \(B_r^{food} > miles_r e_{vehicle}\), then \(E_r>0\) and the route receives
-  an environmental reward;
-- if they are equal, then \(E_r=0\) and climate has no effect on that route's
-  score;
-- if \(B_r^{food} < miles_r e_{vehicle}\), then \(E_r<0\) and the route receives
-  an environmental penalty.
-
-The environmental term is deliberately not a hard feasibility constraint.
-Pantry equity, service priority, and volunteer fit can still make a route
-system-optimal even when its standalone climate balance is negative. Conversely,
-a large climate benefit cannot by itself erase every social or driver-burden
-consideration.
-
-The ledger credits usable donated food for avoided production and the donor's
-avoided disposal pathway, then subtracts residual redistribution waste and
-vehicle emissions. Mileage is not penalized a second time as carbon in the
-quality score: driving minutes capture volunteer burden, while distance already
-contributes to \(E_r\). Food mass, usable share, disposal pathway, and emissions
-factors are transparent academic scenario inputs—not measured bakery-specific
-emissions.
+covering pantry reach, raw and saved-food volume/evenness, opportunity priority,
+net direct CO₂ benefit, and driver fit. See [docs/model.md](docs/model.md) for
+the full formulation and [docs/institutions.md](docs/institutions.md) for every
+fixed institution input.
 
 Opening the app creates a decision epoch; it does not force immediate
 departure. The route generator chooses a just-in-time departure, includes 5
@@ -371,10 +346,9 @@ Each report includes:
   plus expected acceptance under the optional behavioral assumption;
 - **rejection diagnostics:** predicted likely-rejected offer count and rate;
 - **computational performance:** Gurobi runtime, status, and optimality gap;
-- **lifecycle environmental performance:** estimated food collected, usable
-  food delivered, avoided production-and-disposal emissions, vehicle emissions,
-  residual redistribution-waste emissions, net kg CO2e benefit, and net benefit
-  per completed delivery;
+- **food and environmental performance:** ultimately saved food, bakery food
+  not picked up, collected food not ultimately distributed, and one net direct
+  kg CO₂e benefit;
 - **objective evidence:** total declared system-objective value and feasible
   candidate count; and
 - a timestamped event log containing every route recommended to each driver and
@@ -392,7 +366,7 @@ expected-completion value, subject to assignment and timing constraints.
 
 ```text
 bakedboston_optimizer/
-  environment.py      Transparent lifecycle CO2e scenario accounting
+  environment.py      Transparent waste-versus-transport CO2e accounting
   experiment.py       Rolling-horizon policies, acceptance, evaluation
   compare.py          Five-day policy-comparison CLI
   simulation.py       Virtual schedule clock, seeded events, metrics

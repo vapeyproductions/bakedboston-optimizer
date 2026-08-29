@@ -83,54 +83,45 @@ and ending ZIP codes are soft spatial preferences represented by estimated
 circular areas. A route is penalized only for its shortest straight-line miss
 outside those areas; an exact match has zero deviation and receives no bonus.
 
-## Candidate quality
+## Food and environmental accounting
 
-Environmental impact is not represented by mileage alone. For feasible route
-\(r=(d,b,p)\), the model first constructs a transparent lifecycle ledger:
-
-\[
-E_r = m_r u_r e_{production}
-+ m_r e_{avoided\ disposal}(h_b)
-- \ell_r e_{vehicle}
-- m_r(1-u_r)e_{residual\ waste}
-\]
-
-where:
-
-- \(m_r\) is the estimated kilograms collected from the bakery occurrence;
-- \(u_r\) is the share expected to remain usable after redistribution;
-- \(h_b\) is the bakery's counterfactual disposal pathway (landfill or compost);
-- \(\ell_r\) is the full driver-origin → bakery → pantry route distance;
-- the first two terms are avoided food-production and disposal impacts; and
-- the last two terms are vehicle emissions and the burden of unusable food
-  entering the redistribution chain.
-
-Positive \(E_r\) means the modeled avoided food-system emissions exceed the
-route and residual-waste burdens. The default academic scenario uses 0.42 kg
-CO₂e per usable kilogram for avoided production, 0.16 kg CO₂e/kg for avoided
-landfill or 0.04 kg CO₂e/kg for avoided compost, 0.32 kg CO₂e per route mile,
-and 0.20 kg CO₂e/kg of residual redistribution waste. These are explicit
-scenario parameters for comparison—not measured bakery-specific emissions or
-a verified carbon inventory.
-
-Route quality is then:
+Each bakery \(b\) has fixed triangular distributions for daily food amount
+\(Q_{bd}\) and usability \(U_{bd}\). Their parameters do not change between
+runs; the seed and occurrence ID determine the reproducible daily draws. Each
+pantry \(p\) has a fixed distribution fraction \(D_p\). A selected route's
+ultimately saved food is
 
 \[
-quality_r =
-45 \cdot priority_p
-- driveMinutes_r
-- 24 \cdot outsideWindowRatio_r
-- 18 \cdot spatialDeviationRatio_r
-+ 1.5 \cdot E_r
+H_{bpd}=Q_{bd}U_{bd}D_p.
 \]
 
-where:
+If a food-available bakery occurrence is not picked up, all \(Q_{bd}\) is
+recorded as uncollected bakery food. If it is picked up, the model records
 
-- `outsideWindowRatio` is the route's minutes outside the requested interval,
-  divided by the length of that interval; and
-- `spatialDeviationRatio` compares the bakery's miss from the requested
-  starting ZIP area and the pantry's miss from the requested ending ZIP area
-  with the corresponding misses of every other feasible route for that driver.
+\[
+W_{bpd}=Q_{bd}-H_{bpd}
+\]
+
+as collected food that is not ultimately distributed. Each bakery has fixed
+landfill, pig-farm, and compost shares \((L_b,P_b,C_b)\), which sum to one. With
+pathway coefficients \((e_L,e_P,e_C)=(0.36,-0.12,0.00581)\) kg CO₂e/kg waste,
+define \(e_b=L_be_L+P_be_P+C_be_C\). The no-pickup result is \(Q_{bd}e_b\) and
+the completed-route waste result is \(W_{bpd}e_b\).
+
+Transportation uses 0.41947 kg CO₂e/tonne-km:
+
+\[
+T_r=0.41947\left(\frac{Q_{bd}}{1000}\right)(1.60934\,miles_r).
+\]
+
+The environmental coefficient is \(E_r=(Q_{bd}-W_{bpd})e_b-T_r\). The primary
+score conservatively sets avoided-production substitution to zero; the declared
+0.38 kg CO₂e/kg food coefficient remains available for sensitivity analysis.
+These are paper-derived scenario values, not a measured BakedBoston carbon
+inventory. Fixed inputs are listed in [institutions.md](institutions.md).
+
+Driver fit is one minus the mean normalized drive-time, requested-window, and
+spatial burdens, with each burden clipped to \([0,1]\).
 
 More precisely:
 
@@ -169,13 +160,9 @@ normalized components. If every alternative has zero deviation for one
 component, that component contributes zero. This creates a relative penalty in
 \([0,1]\), favors the closest alternatives, and never rewards an exact match.
 
-Distance is not charged a second time as a generic mileage proxy. Drive minutes
-represent volunteer burden and traffic, while route miles enter the lifecycle
-ledger as vehicle emissions. This separation avoids double-counting distance
-and allows a slightly longer route to remain preferable when it moves more
-usable food, avoids a higher-impact disposal pathway, or reaches a pantry with
-a larger service gap. The weights and environmental assumptions are centralized
-so they can be tested and tuned without changing the constraints.
+Distance enters environmental accounting through tonne-kilometres and driver
+fit through a normalized time burden. There is no separate generic mileage
+penalty in the network objective.
 
 ## Participation estimate
 
@@ -217,11 +204,22 @@ therefore lose to a more volunteer-compatible assignment with greater expected
 completion.
 
 Second, among solutions retaining at least 99% of the optimal first-stage
-value, maximize social and sustainable-logistics quality:
+value, maximize a normalized 100-point score:
 
 \[
-Z_2 = \max \sum_{a \in A} quality_a x_a.
+Z_2=10C+10V_Q+10F_Q+10V_H+10F_H+10P+20E+20D.
 \]
+
+Every component lies in \([0,1]\): pantry coverage \(C\), selected raw-food
+volume \(V_Q\), cumulative raw-food evenness \(F_Q\), ultimately saved-food
+volume \(V_H\), cumulative saved-food evenness \(F_H\), opportunity priority
+\(P\), min–max-normalized direct environmental benefit \(E\), and normalized
+driver fit \(D\). Priority and the per-route environmental and driver-fit
+values are summed over selected routes and divided by the epoch's maximum
+feasible assignment count. Binary pantry-visit variables model coverage;
+auxiliary continuous variables linearize pairwise absolute pantry food-balance
+gaps. Cumulative totals carry forward across rolling epochs. This encourages
+balanced allocation but does not claim the stronger envy-free property.
 
 The 1% tolerance avoids sacrificing meaningful expected completion for a
 secondary improvement while allowing the solver to choose a materially fairer,
@@ -284,13 +282,11 @@ The API returns the selected assignments plus:
 - feasible candidate count;
 - matched assignment count;
 - expected completed deliveries;
-- total route quality;
+- normalized food/fairness/environment/driver-fit score;
 - total route mileage;
-- estimated kilograms entering redistribution;
-- usable kilograms delivered;
-- avoided upstream and counterfactual-disposal emissions;
-- route-transport emissions;
-- residual redistribution-waste emissions;
+- ultimately saved food;
+- bakery food not picked up;
+- collected food not ultimately distributed;
 - net environmental benefit in kg CO₂e;
 - runtime;
 - MIP gap when Gurobi exposes it.

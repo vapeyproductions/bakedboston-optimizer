@@ -8,7 +8,12 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 from .google_maps import GoogleMapsProvider
-from .models import AddressValidationStatus, Location
+from .models import (
+    AddressValidationStatus,
+    Location,
+    TriangularDistribution,
+    WasteAllocation,
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +29,11 @@ class OrganizationRecord:
     schedule: dict[str, Any]
     schedule_source_url: str = ""
     schedule_verified_at: str = ""
+    postal_code: str = ""
+    food_amount_distribution: TriangularDistribution | None = None
+    usable_fraction_distribution: TriangularDistribution | None = None
+    waste_allocation: WasteAllocation | None = None
+    pantry_distribution_fraction: float | None = None
 
     @property
     def optimization_eligible(self) -> bool:
@@ -48,7 +58,10 @@ class OrganizationRecord:
                 longitude=self.longitude,
                 google_place_id=self.google_place_id,
                 validation_status=status,
-                postal_code=_postal_code(self.formatted_address or self.address),
+                postal_code=(
+                    self.postal_code
+                    or _postal_code(self.formatted_address or self.address)
+                ),
             )
         if google is None:
             raise ValueError(f"{self.name} needs geocoding before it can be optimized")
@@ -185,28 +198,83 @@ def _shared(item: dict[str, Any]) -> dict[str, Any]:
         "longitude": float(item["longitude"]) if item.get("longitude") is not None else None,
         "schedule_source_url": str(item.get("scheduleSourceUrl") or ""),
         "schedule_verified_at": str(item.get("scheduleVerifiedAt") or ""),
+        "postal_code": str(item.get("postalCode") or ""),
     }
 
 
 def _bakery(item: dict[str, Any]) -> OrganizationRecord:
-    return OrganizationRecord(**_shared(item), schedule={
-        "recurringDays": item.get("recurringDays", ""),
-        "businessOpenTime": item.get("businessOpenTime", "{}"),
-        "businessCloseTime": item.get("businessCloseTime", "{}"),
-        "readyTime": item.get("readyTime", ""),
-        "pickupDeadline": item.get("pickupDeadline", ""),
-    })
+    return OrganizationRecord(
+        **_shared(item),
+        schedule={
+            "recurringDays": item.get("recurringDays", ""),
+            "businessOpenTime": item.get("businessOpenTime", "{}"),
+            "businessCloseTime": item.get("businessCloseTime", "{}"),
+            "readyTime": item.get("readyTime", ""),
+            "pickupDeadline": item.get("pickupDeadline", ""),
+        },
+        food_amount_distribution=_triangular_distribution(
+            item.get("foodAmountDistributionKg")
+        ),
+        usable_fraction_distribution=_triangular_distribution(
+            item.get("usableFractionDistribution")
+        ),
+        waste_allocation=_waste_allocation(item.get("wasteAllocation")),
+    )
 
 
 def _pantry(item: dict[str, Any]) -> OrganizationRecord:
-    return OrganizationRecord(**_shared(item), schedule={
-        "recurringDays": item.get("recurringDays", ""),
-        "openTime": item.get("openTime", ""),
-        "closeTime": item.get("closeTime", ""),
-        "latestPermittedArrival": item.get("latestPermittedArrival", ""),
-        "serviceModes": item.get("serviceModes", "[]"),
-        "deliveriesSevenDays": item.get("deliveriesSevenDays", 0),
-    })
+    distribution_value = item.get("distributionFraction")
+    distribution_fraction = (
+        float(distribution_value) if distribution_value is not None else None
+    )
+    if distribution_fraction is not None and not 0 <= distribution_fraction <= 1:
+        raise ValueError("distributionFraction must be between 0 and 1")
+    return OrganizationRecord(
+        **_shared(item),
+        schedule={
+            "recurringDays": item.get("recurringDays", ""),
+            "openTime": item.get("openTime", ""),
+            "closeTime": item.get("closeTime", ""),
+            "latestPermittedArrival": item.get("latestPermittedArrival", ""),
+            "serviceModes": item.get("serviceModes", "[]"),
+            "deliveriesSevenDays": item.get("deliveriesSevenDays", 0),
+        },
+        pantry_distribution_fraction=distribution_fraction,
+    )
+
+
+def _triangular_distribution(value: object) -> TriangularDistribution | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as error:
+            raise ValueError("invalid triangular distribution JSON") from error
+    if not isinstance(value, dict):
+        raise ValueError("triangular distribution must be an object")
+    return TriangularDistribution(
+        minimum=float(value["minimum"]),
+        mode=float(value["mode"]),
+        maximum=float(value["maximum"]),
+    )
+
+
+def _waste_allocation(value: object) -> WasteAllocation | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as error:
+            raise ValueError("invalid waste allocation JSON") from error
+    if not isinstance(value, dict):
+        raise ValueError("waste allocation must be an object")
+    return WasteAllocation(
+        landfill=float(value.get("landfill", 0.0)),
+        pig_farm=float(value.get("pigFarm", 0.0)),
+        compost=float(value.get("compost", 0.0)),
+    )
 
 
 def _driver(item: dict[str, Any]) -> DriverRecord:

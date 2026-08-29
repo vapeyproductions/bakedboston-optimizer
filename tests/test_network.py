@@ -77,6 +77,39 @@ class NetworkTests(unittest.TestCase):
         self.assertIsNotNone(snapshot.drivers[0].location())
         self.assertEqual(snapshot.pantry_window_confirmations[0]["recipientId"], 4)
 
+    def test_academic_food_parameters_are_parsed(self) -> None:
+        snapshot = parse_snapshot({
+            "schemaVersion": 2,
+            "generatedAt": "2026-07-27T12:00:00Z",
+            "bakeries": [{
+                "id": 1,
+                "name": "Bakery",
+                "address": "1 Main St, Boston, MA 02110",
+                "postalCode": "02110",
+                "latitude": 42.35,
+                "longitude": -71.06,
+                "foodAmountDistributionKg": {"minimum": 10, "mode": 15, "maximum": 20},
+                "usableFractionDistribution": {"minimum": 0.7, "mode": 0.8, "maximum": 0.9},
+                "wasteAllocation": {"landfill": 0.4, "pigFarm": 0.35, "compost": 0.25},
+            }],
+            "pantries": [{
+                "id": 2,
+                "name": "Pantry",
+                "address": "2 Main St, Boston, MA 02111",
+                "latitude": 42.36,
+                "longitude": -71.05,
+                "distributionFraction": 0.76,
+            }],
+        })
+
+        bakery = snapshot.bakeries[0]
+        pantry = snapshot.pantries[0]
+        self.assertEqual(bakery.postal_code, "02110")
+        self.assertEqual(bakery.food_amount_distribution.mode, 15)
+        self.assertEqual(bakery.usable_fraction_distribution.mode, 0.8)
+        self.assertEqual(bakery.waste_allocation.pig_farm, 0.35)
+        self.assertEqual(pantry.pantry_distribution_fraction, 0.76)
+
 
 if __name__ == "__main__":
     unittest.main()

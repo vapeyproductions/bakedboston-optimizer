@@ -37,8 +37,8 @@ The seed controls three uncertain inputs:
 2. whether staff are available for a staffed pantry occurrence;
 3. where and when synthetic volunteer drivers are available, including whether
    they supply a preferred destination; and
-4. estimated surplus-food mass, usable share, and the donor's landfill-or-
-   compost disposal counterfactual.
+4. each bakery's daily food and usability draws from its own fixed triangular
+   distributions.
 
 Unattended pantry windows are treated as available whenever the public schedule
 window is active.
@@ -68,12 +68,10 @@ Every policy receives the exact same feasible candidate set. Time-window and
 location validity are therefore constraints for all policies, not advantages
 given only to BakedBoston.
 
-- **BakedBoston MIP:** hierarchically maximizes expected completed pickups, then
-  retains at least 99% of that value while maximizing pantry-priority reward and
-  minimizing driver burden, requested-time miss, and spatial miss while
-  rewarding estimated net lifecycle climate benefit. That benefit credits
-  avoided food production and donor disposal, then subtracts vehicle emissions
-  and residual redistribution-waste emissions.
+- **BakedBoston MIP:** maximizes expected completed pickups, then retains at
+  least 99% of that value while balancing normalized pantry coverage, raw and
+  saved-food volume/evenness, opportunity priority, net direct CO₂e benefit,
+  and driver fit.
 - **Random feasible:** selects a seeded random conflict-free assignment.
 - **Shortest route:** greedily minimizes driving time.
 - **Earliest deadline:** greedily serves the bakery pickup with the earliest
@@ -132,10 +130,9 @@ The comparison report includes:
 - distribution fairness as a pantry-service Gini coefficient and service gap;
 - mean drive time, distance, preferred-destination deviation, and
   total trip duration;
-- estimated food collected and usable food delivered;
-- avoided food-production and donor-disposal emissions, vehicle emissions,
-  residual redistribution-waste emissions, net kg CO2e benefit, and net benefit
-  per completed delivery;
+- ultimately saved food \(Q\times U\times D\), bakery food not picked up, and
+  collected food not ultimately distributed;
+- one net direct kg CO₂e result;
 - offers, accepted routes, simulated rejections, expected acceptance, likely
   rejections, and likely-rejection rate;
 - feasible candidates examined and the declared system-objective value; and

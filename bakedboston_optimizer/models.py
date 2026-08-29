@@ -12,10 +12,40 @@ class AddressValidationStatus(StrEnum):
 
 
 class DisposalPathway(StrEnum):
-    """Counterfactual destination for surplus food if it is not donated."""
+    """Legacy single-pathway values retained for API compatibility."""
 
     LANDFILL = "landfill"
+    PIG_FARM = "pig_farm"
     COMPOST = "compost"
+
+
+@dataclass(frozen=True)
+class TriangularDistribution:
+    """Fixed, inspectable parameters for one bounded daily scenario draw."""
+
+    minimum: float
+    mode: float
+    maximum: float
+
+    def __post_init__(self) -> None:
+        if not self.minimum <= self.mode <= self.maximum:
+            raise ValueError("triangular distribution requires minimum <= mode <= maximum")
+
+
+@dataclass(frozen=True)
+class WasteAllocation:
+    """Fixed fractions of food waste sent to each modeled pathway."""
+
+    landfill: float = 1.0
+    pig_farm: float = 0.0
+    compost: float = 0.0
+
+    def __post_init__(self) -> None:
+        for name, value in self.__dict__.items():
+            if not 0 <= value <= 1:
+                raise ValueError(f"{name} waste fraction must be between 0 and 1")
+        if abs(self.landfill + self.pig_farm + self.compost - 1.0) > 1e-6:
+            raise ValueError("waste allocation fractions must sum to 1")
 
 
 @dataclass(frozen=True)
@@ -39,10 +69,15 @@ class BakeryPickup:
     ready_at: datetime
     pickup_deadline: datetime
     claimed: bool = False
-    # Academic scenario estimates used by the lifecycle-impact calculation.
+    # Academic scenario estimates used by the food and direct-CO2e calculation.
     # They are intentionally explicit rather than inferred from route miles.
     estimated_food_kg: float = 20.0
     usable_fraction: float = 0.80
+    food_amount_distribution: TriangularDistribution | None = None
+    usable_fraction_distribution: TriangularDistribution | None = None
+    waste_allocation: WasteAllocation = WasteAllocation()
+    # Deprecated single-pathway field retained so older operational payloads
+    # can still be constructed. Academic scenarios use ``waste_allocation``.
     donor_disposal_baseline: DisposalPathway = DisposalPathway.LANDFILL
 
     def __post_init__(self) -> None:
@@ -61,10 +96,17 @@ class Pantry:
     receiving_end: datetime
     latest_permitted_arrival: datetime
     priority_score: float
+    distribution_fraction: float = 1.0
+    historical_raw_food_kg: float = 0.0
+    historical_saved_food_kg: float = 0.0
 
     def __post_init__(self) -> None:
         if not 0 <= self.priority_score <= 1:
             raise ValueError("priority_score must be between 0 and 1")
+        if not 0 <= self.distribution_fraction <= 1:
+            raise ValueError("distribution_fraction must be between 0 and 1")
+        if self.historical_raw_food_kg < 0 or self.historical_saved_food_kg < 0:
+            raise ValueError("historical food totals cannot be negative")
 
 
 @dataclass(frozen=True)
@@ -149,6 +191,14 @@ class RouteCandidate:
     acceptance_probability: float = 1.0
     estimated_food_kg: float = 0.0
     usable_food_kg: float = 0.0
+    bakery_usable_fraction: float = 0.0
+    pantry_distribution_fraction: float = 0.0
+    pantry_historical_raw_food_kg: float = 0.0
+    pantry_historical_saved_food_kg: float = 0.0
+    food_saved_kg: float = 0.0
+    collected_not_distributed_kg: float = 0.0
+    counterfactual_waste_kg_co2e: float = 0.0
+    route_waste_kg_co2e: float = 0.0
     avoided_system_kg_co2e: float = 0.0
     transport_kg_co2e: float = 0.0
     residual_waste_kg_co2e: float = 0.0
@@ -177,6 +227,8 @@ class SolverDiagnostics:
     route_distance_miles: float = 0.0
     estimated_food_kg: float = 0.0
     usable_food_kg: float = 0.0
+    food_saved_kg: float = 0.0
+    collected_not_distributed_kg: float = 0.0
     avoided_system_kg_co2e: float = 0.0
     transport_kg_co2e: float = 0.0
     residual_waste_kg_co2e: float = 0.0

@@ -261,7 +261,8 @@ class OptimizerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.diagnostics.matched_count, 2)
-        self.assertLess(result.diagnostics.route_quality, 0)
+        self.assertGreaterEqual(result.diagnostics.route_quality, 0)
+        self.assertLessEqual(result.diagnostics.route_quality, 100)
 
     def test_participation_estimate_can_outweigh_route_quality(self) -> None:
         candidates = [
@@ -307,6 +308,19 @@ class OptimizerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.assignments[0].route.pantry_id, "p1")
+
+    def test_normalized_stage_two_expands_pantry_coverage(self) -> None:
+        candidates = [
+            self.assignment("r1", "d1", "b1", "p1", 10),
+            self.assignment("r1", "d1", "b1", "p2", 10),
+            self.assignment("r2", "d2", "b2", "p1", 10),
+            self.assignment("r2", "d2", "b2", "p2", 10),
+        ]
+        result = optimize_assignment_candidates(candidates)
+        self.assertEqual(result.diagnostics.matched_count, 2)
+        self.assertEqual({item.route.pantry_id for item in result.assignments}, {"p1", "p2"})
+        self.assertGreaterEqual(result.diagnostics.route_quality, 0)
+        self.assertLessEqual(result.diagnostics.route_quality, 100)
 
     def test_recommendation_layer_serves_more_drivers_before_adding_quality(self) -> None:
         candidates = [

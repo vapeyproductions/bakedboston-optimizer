@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import random
 from collections import defaultdict, deque
 from dataclasses import dataclass, replace
@@ -11,11 +12,12 @@ from zoneinfo import ZoneInfo
 from .models import (
     AddressValidationStatus,
     BakeryPickup,
-    DisposalPathway,
     DriverRequest,
     Location,
     NetworkOptimizationResult,
     Pantry,
+    TriangularDistribution,
+    WasteAllocation,
 )
 from .network import NetworkSnapshot, OrganizationRecord
 from .optimizer import OptimizationWeights, optimize_network
@@ -89,6 +91,10 @@ class SimulationAssignment:
     score: float
     estimated_food_kg: float
     usable_food_kg: float
+    bakery_usable_fraction: float
+    pantry_distribution_fraction: float
+    food_saved_kg: float
+    collected_not_distributed_kg: float
     avoided_system_kg_co2e: float
     transport_kg_co2e: float
     residual_waste_kg_co2e: float
@@ -110,11 +116,14 @@ class SimulationAssignment:
             "waitingMinutes": round(self.waiting_minutes, 2),
             "pantryPriority": round(self.pantry_priority, 4),
             "score": round(self.score, 3),
-            "estimatedFoodKg": round(self.estimated_food_kg, 3),
-            "usableFoodKg": round(self.usable_food_kg, 3),
-            "avoidedSystemKgCO2e": round(self.avoided_system_kg_co2e, 3),
-            "transportKgCO2e": round(self.transport_kg_co2e, 3),
-            "residualWasteKgCO2e": round(self.residual_waste_kg_co2e, 3),
+            "bakeryUsableFraction": round(self.bakery_usable_fraction, 4),
+            "pantryDistributionFraction": round(
+                self.pantry_distribution_fraction, 4
+            ),
+            "foodSavedKg": round(self.food_saved_kg, 3),
+            "collectedNotDistributedKg": round(
+                self.collected_not_distributed_kg, 3
+            ),
             "netEnvironmentalBenefitKgCO2e": round(
                 self.net_environmental_benefit_kg_co2e, 3
             ),
@@ -129,6 +138,7 @@ class SimulationDayResult:
     scheduled_pantry_windows: int
     open_pantry_windows: int
     synthetic_drivers: int
+    uncollected_bakery_food_kg: float
     assignments: tuple[SimulationAssignment, ...]
     events: tuple[SimulationEvent, ...]
     solver: dict[str, Any]
@@ -147,6 +157,7 @@ class SimulationDayResult:
             "syntheticDrivers": self.synthetic_drivers,
             "matchedPickups": len(self.assignments),
             "missedPickups": self.missed_pickups,
+            "uncollectedBakeryFoodKg": round(self.uncollected_bakery_food_kg, 3),
             "solver": self.solver,
             "assignments": [assignment.as_dict() for assignment in self.assignments],
             "events": [event.as_dict() for event in self.events],
@@ -166,14 +177,12 @@ class SimulationReport:
         served_opportunities = sum(
             item["served"] for item in self.pantry_opportunities.values()
         )
-        estimated_food_kg = sum(item.estimated_food_kg for item in assignments)
-        usable_food_kg = sum(item.usable_food_kg for item in assignments)
-        avoided_system_kg_co2e = sum(
-            item.avoided_system_kg_co2e for item in assignments
+        food_saved_kg = sum(item.food_saved_kg for item in assignments)
+        collected_not_distributed_kg = sum(
+            item.collected_not_distributed_kg for item in assignments
         )
-        transport_kg_co2e = sum(item.transport_kg_co2e for item in assignments)
-        residual_waste_kg_co2e = sum(
-            item.residual_waste_kg_co2e for item in assignments
+        uncollected_bakery_food_kg = sum(
+            day.uncollected_bakery_food_kg for day in self.days
         )
         net_environmental_benefit_kg_co2e = sum(
             item.net_environmental_benefit_kg_co2e for item in assignments
@@ -199,11 +208,11 @@ class SimulationReport:
                 round(sum(item.waiting_minutes for item in assignments) / len(assignments), 2)
                 if assignments else 0.0
             ),
-            "estimatedFoodKgRedistributed": round(estimated_food_kg, 3),
-            "usableFoodKgDelivered": round(usable_food_kg, 3),
-            "avoidedSystemKgCO2e": round(avoided_system_kg_co2e, 3),
-            "transportKgCO2e": round(transport_kg_co2e, 3),
-            "residualWasteKgCO2e": round(residual_waste_kg_co2e, 3),
+            "foodSavedKg": round(food_saved_kg, 3),
+            "uncollectedBakeryFoodKg": round(uncollected_bakery_food_kg, 3),
+            "collectedNotDistributedKg": round(
+                collected_not_distributed_kg, 3
+            ),
             "netEnvironmentalBenefitKgCO2e": round(
                 net_environmental_benefit_kg_co2e, 3
             ),
@@ -274,6 +283,8 @@ def simulate_snapshot(
     opportunity_totals: dict[str, dict[str, int]] = defaultdict(
         lambda: {"available": 0, "served": 0}
     )
+    pantry_raw_totals: dict[int, float] = defaultdict(float)
+    pantry_saved_totals: dict[int, float] = defaultdict(float)
     day_results: list[SimulationDayResult] = []
 
     for offset in range(config.days):
@@ -283,6 +294,7 @@ def simulate_snapshot(
             scheduled_pickups,
             config.bakery_food_probability,
             rng,
+            random_seed=config.random_seed,
         )
         scheduled_pantries = _pantry_windows(snapshot, service_date, zone)
         open_pantries, pantry_events = _sample_pantry_openings(
@@ -294,6 +306,8 @@ def simulate_snapshot(
             replace(
                 pantry,
                 priority_score=pantry_priority(tuple(history[_organization_id(pantry.id)])),
+                historical_raw_food_kg=pantry_raw_totals[_organization_id(pantry.id)],
+                historical_saved_food_kg=pantry_saved_totals[_organization_id(pantry.id)],
             )
             for pantry in open_pantries
         ]
@@ -311,7 +325,20 @@ def simulate_snapshot(
             weights=weights,
         )
         assignments = _assignments(result)
+        pickup_by_id = {pickup.id: pickup for pickup in pickups}
+        collected_pickup_ids = {assignment.pickup_id for assignment in assignments}
+        uncollected_bakery_food_kg = sum(
+            pickup.estimated_food_kg
+            for pickup in pickups
+            if pickup.id not in collected_pickup_ids
+        )
         served_windows = {assignment.pantry_window_id for assignment in assignments}
+        for assignment in assignments:
+            pantry_id = _organization_id(assignment.pantry_window_id)
+            pantry_raw_totals[pantry_id] += pickup_by_id[
+                assignment.pickup_id
+            ].estimated_food_kg
+            pantry_saved_totals[pantry_id] += assignment.food_saved_kg
         for pantry in prioritized_pantries:
             served = pantry.id in served_windows
             pantry_id = _organization_id(pantry.id)
@@ -344,6 +371,7 @@ def simulate_snapshot(
             scheduled_pantry_windows=len(scheduled_pantries),
             open_pantry_windows=len(prioritized_pantries),
             synthetic_drivers=len(requests),
+            uncollected_bakery_food_kg=uncollected_bakery_food_kg,
             assignments=assignments,
             events=events,
             solver=_solver_dict(result),
@@ -375,6 +403,14 @@ def _assignments(result: NetworkOptimizationResult) -> tuple[SimulationAssignmen
             score=assignment.route.score,
             estimated_food_kg=assignment.route.estimated_food_kg,
             usable_food_kg=assignment.route.usable_food_kg,
+            bakery_usable_fraction=assignment.route.bakery_usable_fraction,
+            pantry_distribution_fraction=(
+                assignment.route.pantry_distribution_fraction
+            ),
+            food_saved_kg=assignment.route.food_saved_kg,
+            collected_not_distributed_kg=(
+                assignment.route.collected_not_distributed_kg
+            ),
             avoided_system_kg_co2e=assignment.route.avoided_system_kg_co2e,
             transport_kg_co2e=assignment.route.transport_kg_co2e,
             residual_waste_kg_co2e=assignment.route.residual_waste_kg_co2e,
@@ -398,11 +434,10 @@ def _solver_dict(result: NetworkOptimizationResult) -> dict[str, Any]:
             diagnostics.expected_completed_deliveries, 4
         ),
         "routeDistanceMiles": round(diagnostics.route_distance_miles, 4),
-        "estimatedFoodKg": round(diagnostics.estimated_food_kg, 4),
-        "usableFoodKg": round(diagnostics.usable_food_kg, 4),
-        "avoidedSystemKgCO2e": round(diagnostics.avoided_system_kg_co2e, 4),
-        "transportKgCO2e": round(diagnostics.transport_kg_co2e, 4),
-        "residualWasteKgCO2e": round(diagnostics.residual_waste_kg_co2e, 4),
+        "foodSavedKg": round(diagnostics.food_saved_kg, 4),
+        "collectedNotDistributedKg": round(
+            diagnostics.collected_not_distributed_kg, 4
+        ),
         "netEnvironmentalBenefitKgCO2e": round(
             diagnostics.net_environmental_benefit_kg_co2e, 4
         ),
@@ -439,6 +474,9 @@ def _bakery_windows(
                 location=record.location(),
                 ready_at=ready,
                 pickup_deadline=deadline,
+                food_amount_distribution=record.food_amount_distribution,
+                usable_fraction_distribution=record.usable_fraction_distribution,
+                waste_allocation=record.waste_allocation or WasteAllocation(),
             ))
     for window in snapshot.availability_windows:
         if window.get("organizationType") != "bakery" or window.get("paused"):
@@ -456,6 +494,9 @@ def _bakery_windows(
             location=record.location(),
             ready_at=starts,
             pickup_deadline=ends,
+            food_amount_distribution=record.food_amount_distribution,
+            usable_fraction_distribution=record.usable_fraction_distribution,
+            waste_allocation=record.waste_allocation or WasteAllocation(),
         ))
     return sorted(result, key=lambda item: (item.ready_at, item.id))
 
@@ -505,6 +546,11 @@ def _pantry_windows(
                 receiving_end=ends,
                 latest_permitted_arrival=min(latest, ends),
                 priority_score=0.5,
+                distribution_fraction=(
+                    record.pantry_distribution_fraction
+                    if record.pantry_distribution_fraction is not None
+                    else 1.0
+                ),
             ), mode))
     for window in snapshot.availability_windows:
         if window.get("organizationType") != "pantry" or window.get("paused"):
@@ -528,6 +574,11 @@ def _pantry_windows(
             receiving_end=ends,
             latest_permitted_arrival=min(latest, ends),
             priority_score=0.5,
+            distribution_fraction=(
+                record.pantry_distribution_fraction
+                if record.pantry_distribution_fraction is not None
+                else 1.0
+            ),
         ), str(window.get("serviceMode") or "staffed")))
     return sorted(result, key=lambda item: (item[0].receiving_start, item[0].id))
 
@@ -536,24 +587,44 @@ def _sample_food_availability(
     scheduled: list[BakeryPickup],
     probability: float,
     rng: random.Random,
+    *,
+    random_seed: int = 0,
 ) -> tuple[list[BakeryPickup], tuple[SimulationEvent, ...]]:
     available: list[BakeryPickup] = []
     events: list[SimulationEvent] = []
     for pickup in scheduled:
-        has_food = rng.random() < probability
+        digest = hashlib.sha256(
+            f"{random_seed}|bakery-surplus|{pickup.id}".encode()
+        ).digest()
+        pickup_rng = random.Random(int.from_bytes(digest[:8], "big"))
+        has_food = pickup_rng.random() < probability
         if has_food:
-            estimated_food_kg = round(rng.uniform(8.0, 28.0), 2)
-            usable_fraction = round(rng.uniform(0.65, 0.95), 3)
-            disposal_pathway = (
-                DisposalPathway.LANDFILL
-                if rng.random() < 0.70
-                else DisposalPathway.COMPOST
+            food_distribution = pickup.food_amount_distribution or (
+                TriangularDistribution(8.0, 18.0, 28.0)
+            )
+            usability_distribution = pickup.usable_fraction_distribution or (
+                TriangularDistribution(0.65, 0.80, 0.95)
+            )
+            estimated_food_kg = round(
+                pickup_rng.triangular(
+                    food_distribution.minimum,
+                    food_distribution.maximum,
+                    food_distribution.mode,
+                ),
+                2,
+            )
+            usable_fraction = round(
+                pickup_rng.triangular(
+                    usability_distribution.minimum,
+                    usability_distribution.maximum,
+                    usability_distribution.mode,
+                ),
+                3,
             )
             pickup = replace(
                 pickup,
                 estimated_food_kg=estimated_food_kg,
                 usable_fraction=usable_fraction,
-                donor_disposal_baseline=disposal_pathway,
             )
             available.append(pickup)
         events.append(SimulationEvent(
@@ -565,8 +636,7 @@ def _sample_food_availability(
             detail=(
                 (
                     f"Synthetic surplus: {pickup.estimated_food_kg:.1f} kg, "
-                    f"{pickup.usable_fraction:.0%} usable, with a "
-                    f"{pickup.donor_disposal_baseline.value} counterfactual."
+                    f"{pickup.usable_fraction:.0%} usable."
                 )
                 if has_food else "No surplus was generated for this schedule occurrence."
             ),

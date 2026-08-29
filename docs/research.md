@@ -83,12 +83,6 @@ results.
 
 ### Timing, uncertainty, and future extensions
 
-- Franceschetti et al. (2011), “The time-dependent pollution-routing problem,”
-  *Transportation Research Part B*, 45(10), 1640–1660.
-  [doi:10.1016/j.trb.2011.07.010](https://doi.org/10.1016/j.trb.2011.07.010).
-  This is relevant to future traffic- and emissions-aware departure planning;
-  the current simulator uses deterministic travel and an explicit route-emission
-  factor inside its lifecycle ledger.
 - “Anticipatory Monte Carlo tree search–based optimization for stochastic
   dynamic routing with time windows” (2026), *Computers & Chemical Engineering*.
   [doi:10.1016/j.cacaie.2026.100024](https://doi.org/10.1016/j.cacaie.2026.100024).
@@ -115,14 +109,11 @@ results.
   while the strongest configurations combined higher-quality food, sorting,
   and shorter direct transport.
 
-  BakedBoston adapts that structure as a route-level carbon ledger with four
-  separately reportable terms: avoided production, avoided donor disposal,
-  vehicle emissions, and residual redistribution-waste emissions. The paper's
-  produce-focused case study is not a bakery emissions factor, so the optimizer
-  exposes its coefficients as tunable academic scenario assumptions and does
-  not present its output as a verified carbon inventory. Other impact categories
-  remain evaluation and future-data extensions rather than being collapsed into
-  a single unsupported score.
+  BakedBoston adapts that structure using fixed bakery waste mixes, pantry
+  distribution fractions, and \(H=Q\times U\times D\). The public simulator
+  reports food saved, bakery food not picked up, collected food not ultimately
+  distributed, and one net direct CO₂e result. These are declared scenario
+  coefficients, not a verified carbon inventory.
 
 ## Evidence and validation boundary
 

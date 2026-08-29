@@ -24,8 +24,8 @@ POLICY_METADATA = {
     "bakedboston_mip": {
         "label": "BakedBoston Gurobi MIP",
         "description": (
-            "Maximizes expected completed assignments first, then lifecycle-aware social and "
-            "route quality across simultaneous drivers."
+            "Maximizes expected completed assignments first, then the normalized food, fairness, "
+            "environmental, and driver-fit objective across simultaneous drivers."
         ),
     },
     "random_feasible": {
@@ -54,7 +54,7 @@ POLICY_METADATA = {
 def _network_payload(snapshot: NetworkSnapshot) -> dict[str, Any]:
     def organization(item: Any, kind: str) -> dict[str, Any]:
         location = item.location()
-        return {
+        payload = {
             "id": f"{kind}-{item.id}",
             "name": item.name,
             "kind": kind,
@@ -62,7 +62,17 @@ def _network_payload(snapshot: NetworkSnapshot) -> dict[str, Any]:
             "longitude": item.longitude,
             "postalCode": estimated_postal_code(location),
             "formattedAddress": location.formatted_address,
+            "schedule": item.schedule,
         }
+        if kind == "bakery":
+            payload.update({
+                "foodAmountDistributionKg": asdict(item.food_amount_distribution) if item.food_amount_distribution is not None else None,
+                "usableFractionDistribution": asdict(item.usable_fraction_distribution) if item.usable_fraction_distribution is not None else None,
+                "wasteAllocation": asdict(item.waste_allocation) if item.waste_allocation is not None else None,
+            })
+        else:
+            payload["distributionFraction"] = item.pantry_distribution_fraction
+        return payload
 
     return {
         "bakeries": [organization(item, "bakery") for item in snapshot.eligible_bakeries],
@@ -84,6 +94,9 @@ def _compact_day(day: dict[str, Any], *, include_trace: bool) -> dict[str, Any]:
             "feasibleCandidatesEvaluated",
             "routesOffered",
             "routesAccepted",
+            "foodSavedKg",
+            "collectedNotDistributedKg",
+            "uncollectedBakeryFoodKg",
             "pickupWindows",
             "pantryWindows",
         )
@@ -175,28 +188,39 @@ def build_web_payload(
         "objectiveWeights": {
             key: value
             for key, value in asdict(weights).items()
-            if value != 0
+            if key in {
+                "pantry_coverage_reward", "raw_food_volume_reward",
+                "raw_food_evenness_reward", "saved_food_volume_reward",
+                "saved_food_evenness_reward", "pantry_priority_reward",
+                "environmental_benefit_reward", "driver_fit_reward",
+            }
+        },
+        "routeTimingWeights": {
+            "driveMinutePenalty": weights.drive_minute_penalty,
+            "requestedTimeDeviationRatioPenalty": weights.requested_time_deviation_ratio_penalty,
+            "spatialDeviationRatioPenalty": weights.spatial_deviation_ratio_penalty,
         },
         "environmentalAssumptions": {
-            "avoidedProductionKgCo2ePerKgUsableFood": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.avoided_production_kg_co2e_per_usable_kg,
-            "avoidedLandfillKgCo2ePerKgDonatedFood": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.avoided_landfill_kg_co2e_per_diverted_kg,
-            "avoidedCompostKgCo2ePerKgDonatedFood": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.avoided_compost_kg_co2e_per_diverted_kg,
-            "redistributionResidualWasteKgCo2ePerKg": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.redistribution_waste_kg_co2e_per_kg,
-            "vehicleKgCo2ePerMile": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.vehicle_kg_co2e_per_mile,
+            "landfillKgCo2ePerKgWaste": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.landfill_kg_co2e_per_kg_waste,
+            "pigFarmKgCo2ePerKgWaste": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.pig_farm_kg_co2e_per_kg_waste,
+            "compostKgCo2ePerKgWaste": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.compost_kg_co2e_per_kg_waste,
+            "transportKgCo2ePerTonneKm": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.transport_kg_co2e_per_tonne_km,
+            "avoidedProductionKgCo2ePerKgFood": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.avoided_production_kg_co2e_per_kg_food,
+            "productionSubstitutionFraction": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.production_substitution_fraction,
             "interpretation": (
-                "Declared academic lifecycle scenario parameters for comparative analysis. Net "
-                "benefit combines avoided food production and donor disposal with vehicle "
-                "emissions and residual redistribution waste. These are not measured bakery-specific "
-                "emissions or a verified BakedBoston carbon inventory."
+                "Declared academic scenario coefficients. The primary objective credits the "
+                "difference between the bakery's no-pickup waste outcome and the waste remaining "
+                "after Q × usability × pantry distribution, then subtracts tonne-kilometre "
+                "transport emissions. Avoided production is held at zero in the primary score."
             ),
         },
         "network": _network_payload(snapshot),
         "selectionRule": (
-            "The joint Gurobi solve first maximizes the number of simultaneous drivers who receive "
-            "a distinct bakery pickup. Each bakery pickup is temporarily owned by one driver's menu, "
-            "while pantry destinations may repeat. Menus are then filled in fairness rounds: every "
-            "feasible driver receives recommendation 1 before any driver receives recommendation 2, "
-            "and so on. Each driver selects rank 1."
+            "The joint Gurobi solve first maximizes expected completed distinct bakery pickups. "
+            "Within one percent of that optimum it maximizes a normalized 100-point score: pantry "
+            "coverage (10), raw donation volume (10), raw donation evenness (10), ultimately saved "
+            "food volume (10), saved-food evenness (10), historical pantry opportunity priority "
+            "(10), net direct CO2 benefit (20), and driver fit (20)."
         ),
         "recommendationAllocation": {
             "bakeryPickupExclusiveAcrossMenus": True,
