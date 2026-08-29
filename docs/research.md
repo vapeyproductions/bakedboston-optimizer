@@ -17,6 +17,7 @@ results.
 | Research stream | Contribution | BakedBoston implementation | Status |
 | --- | --- | --- | --- |
 | Food-rescue scheduling and routing | Joint scheduling, assignment, pickup-and-delivery routing, cost, and service levels | Timed driver–bakery–pantry route columns, hard pickup/receiving windows, one-use bakery occurrences | Adapted and implemented |
+| Nair et al. (2018) comparison model | Mandatory food-rescue service followed by transportation-cost minimization | Public comparator maximizes assigned food-ready pickups, then minimizes miles using current volunteer origins and hard timing feasibility | Distance-first adaptation implemented; not a full PU-PDVRP/Tabu Search replication |
 | Pickup-and-delivery routing | Exact network formulations for compatible pickup and delivery movements | Binary route-column variables with driver and bakery exclusivity | Adapted and implemented |
 | Equitable charitable distribution | Equity and service continuity alongside travel efficiency | Opportunity-based pantry priority, coverage, never-served share, Gini coefficient, and service gap | Adapted and implemented |
 | Online routing with occasional drivers | Rolling decisions instead of one static fleet plan | Seeded driver-arrival epochs and re-optimization over pickups still available | Adapted and implemented |
@@ -36,7 +37,13 @@ results.
   rescue and delivery operations,” *Socio-Economic Planning Sciences*, 63,
   18–32. [doi:10.1016/j.seps.2017.06.003](https://doi.org/10.1016/j.seps.2017.06.003).
   This is the closest direct precedent for combining food-rescue scheduling,
-  assignment, routing, service levels, and cost.
+  assignment, routing, service levels, and cost. BakedBoston also implements a
+  deliberately narrow comparison model derived from this paper: it maximizes
+  feasible pickup assignments under volunteer scarcity and then minimizes
+  distance. The comparator does not receive preference, sigmoid, fairness,
+  food-distribution, or CO₂e inputs. See
+  [comparison-models.md](comparison-models.md) for its equations and the exact
+  boundary between the paper and the platform adaptation.
 - Hernández-Pérez and Salazar-González (2007), “The one-commodity
   pickup-and-delivery traveling salesman problem,” *Networks*.
   [doi:10.1002/net.20209](https://doi.org/10.1002/net.20209). This is a

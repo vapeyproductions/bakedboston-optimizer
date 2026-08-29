@@ -262,6 +262,204 @@ def optimize_assignment_candidates(
         return _optimize_network_with_gurobi(candidate_list, weights)
 
 
+def optimize_nair_distance_first_candidates(
+    candidates: list[AssignmentCandidate] | tuple[AssignmentCandidate, ...],
+) -> NetworkOptimizationResult:
+    """Solve the minimal volunteer-route adaptation of Nair et al. (2018).
+
+    The original PU-PDVRP minimizes transportation cost while requiring its
+    scheduled pickup and delivery nodes to be served. BakedBoston has a scarce,
+    request-driven volunteer fleet, so mandatory service is relaxed only as far
+    as necessary: first maximize the number of assigned food-ready pickups,
+    then minimize total route distance. Current driver location, facility
+    windows, and the driver's hard search horizon are already embedded in the
+    shared feasible candidate set. Soft driver preferences, acceptance,
+    fairness, food-distribution, and environmental terms do not enter this
+    comparator's objective.
+    """
+
+    candidate_list = list(candidates)
+    if not candidate_list:
+        return NetworkOptimizationResult(
+            assignments=(),
+            diagnostics=SolverDiagnostics(
+                backend=(
+                    "gurobi:nair_2018_distance_first_adaptation"
+                    if gp is not None
+                    else "unavailable:nair_2018_distance_first_adaptation"
+                ),
+                status="no_feasible_assignments",
+                candidate_count=0,
+                matched_count=0,
+                route_quality=0.0,
+                runtime_seconds=0.0,
+            ),
+        )
+
+    if gp is None:
+        if not _development_fallback_enabled():
+            raise GurobiUnavailableError(
+                "Gurobi is required, but gurobipy is not installed in the optimizer runtime."
+            )
+        utilities = {
+            _assignment_key(item): -item.route.route_distance_miles
+            for item in candidate_list
+        }
+        assignments = _exact_recommendation_layer(candidate_list, utilities)
+        assignments = tuple(sorted(
+            assignments,
+            key=lambda item: (
+                item.route.depart_at,
+                item.route.route_distance_miles,
+                item.request_id,
+            ),
+        ))
+        return NetworkOptimizationResult(
+            assignments=assignments,
+            diagnostics=_nair_assignment_diagnostics(
+                candidate_list,
+                assignments,
+                backend="development_exact:nair_2018_distance_first_adaptation",
+                status="fallback",
+                runtime_seconds=0.0,
+            ),
+        )
+
+    with _SOLVER_LOCK:
+        model = _model("nair_2018_distance_first_adaptation")
+        try:
+            route_vars = {
+                index: model.addVar(vtype=GRB.BINARY, name=f"assign_{index}")
+                for index in range(len(candidate_list))
+            }
+            for request_id in sorted({item.request_id for item in candidate_list}):
+                model.addConstr(
+                    gp.quicksum(
+                        route_vars[index]
+                        for index, item in enumerate(candidate_list)
+                        if item.request_id == request_id
+                    ) <= 1,
+                    name=f"request_{_safe_name(request_id)}_at_most_once",
+                )
+            for driver_id in sorted({item.driver_id for item in candidate_list}):
+                model.addConstr(
+                    gp.quicksum(
+                        route_vars[index]
+                        for index, item in enumerate(candidate_list)
+                        if item.driver_id == driver_id
+                    ) <= 1,
+                    name=f"driver_{_safe_name(driver_id)}_at_most_once",
+                )
+            for pickup_id in sorted({item.route.bakery_id for item in candidate_list}):
+                model.addConstr(
+                    gp.quicksum(
+                        route_vars[index]
+                        for index, item in enumerate(candidate_list)
+                        if item.route.bakery_id == pickup_id
+                    ) <= 1,
+                    name=f"pickup_{_safe_name(pickup_id)}_at_most_once",
+                )
+
+            model.ModelSense = GRB.MAXIMIZE
+            model.setObjectiveN(
+                gp.quicksum(route_vars.values()),
+                index=0,
+                priority=2,
+                weight=1.0,
+                name="maximize_served_food_ready_pickups",
+            )
+            model.setObjectiveN(
+                -gp.quicksum(
+                    item.route.route_distance_miles * route_vars[index]
+                    for index, item in enumerate(candidate_list)
+                ),
+                index=1,
+                priority=1,
+                weight=1.0,
+                name="minimize_total_route_distance",
+            )
+            model.optimize()
+            if (
+                model.Status not in {GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.TIME_LIMIT}
+                or model.SolCount < 1
+            ):
+                raise RuntimeError(
+                    "Gurobi could not solve the Nair et al. distance-first "
+                    f"adaptation (status {model.Status})."
+                )
+            assignments = tuple(
+                item
+                for index, item in enumerate(candidate_list)
+                if route_vars[index].X > 0.5
+            )
+            assignments = tuple(sorted(
+                assignments,
+                key=lambda item: (
+                    item.route.depart_at,
+                    item.route.route_distance_miles,
+                    item.request_id,
+                ),
+            ))
+            return NetworkOptimizationResult(
+                assignments=assignments,
+                diagnostics=_nair_assignment_diagnostics(
+                    candidate_list,
+                    assignments,
+                    backend="gurobi:nair_2018_distance_first_adaptation",
+                    status=_status_name(model.Status),
+                    runtime_seconds=float(model.Runtime),
+                    mip_gap=_optional_float_attribute(model, "MIPGap"),
+                ),
+            )
+        finally:
+            model.dispose()
+
+
+def _nair_assignment_diagnostics(
+    candidates: Sequence[AssignmentCandidate],
+    assignments: Sequence[AssignmentCandidate],
+    *,
+    backend: str,
+    status: str,
+    runtime_seconds: float,
+    mip_gap: float | None = None,
+) -> SolverDiagnostics:
+    """Report the comparator objective and common post-hoc impact ledger."""
+
+    total_distance = sum(item.route.route_distance_miles for item in assignments)
+    return SolverDiagnostics(
+        backend=backend,
+        status=status,
+        candidate_count=len(candidates),
+        matched_count=len(assignments),
+        route_quality=-total_distance,
+        runtime_seconds=runtime_seconds,
+        mip_gap=mip_gap,
+        expected_completed_deliveries=sum(
+            item.route.acceptance_probability for item in assignments
+        ),
+        route_distance_miles=total_distance,
+        estimated_food_kg=sum(item.route.estimated_food_kg for item in assignments),
+        usable_food_kg=sum(item.route.usable_food_kg for item in assignments),
+        food_saved_kg=sum(item.route.food_saved_kg for item in assignments),
+        collected_not_distributed_kg=sum(
+            item.route.collected_not_distributed_kg for item in assignments
+        ),
+        avoided_system_kg_co2e=sum(
+            item.route.avoided_system_kg_co2e for item in assignments
+        ),
+        transport_kg_co2e=sum(
+            item.route.transport_kg_co2e for item in assignments
+        ),
+        residual_waste_kg_co2e=sum(
+            item.route.residual_waste_kg_co2e for item in assignments
+        ),
+        net_environmental_benefit_kg_co2e=sum(
+            item.route.net_environmental_benefit_kg_co2e for item in assignments
+        ),
+    )
+
+
 def allocate_recommendation_layer(
     candidates: Sequence[AssignmentCandidate],
     utilities: dict[tuple[str, str, str], float] | None = None,

@@ -258,12 +258,12 @@ def simulate_network(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def simulate_custom_experiment(payload: dict[str, Any]) -> dict[str, Any]:
-    """Run a bounded, reproducible six-policy academic experiment.
+    """Run a bounded, reproducible public academic comparison.
 
     The public simulator may vary the size of the synthetic network, but every
-    comparison policy receives the exact same institutions, driver events, and
-    random seed.  The Gurobi MIP therefore remains directly comparable with the
-    five benchmark policies.
+    comparison model receives the exact same institutions, food draws, driver
+    events, and random seed. The public payload currently compares BakedBoston
+    with the Nair et al. (2018) distance-first adaptation.
     """
 
     # Public and saved academic comparisons use one consistent five-day horizon.

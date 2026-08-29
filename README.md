@@ -166,11 +166,11 @@ excluded merely for having received food.
 
 ## Reproducible rolling-horizon comparison
 
-The primary academic experiment compares BakedBoston with five transparent
-baselines over identical five-day seeded scenarios. The bundled public replay
-uses nine fictional bakeries, nine fictional
-pantries, sixty driver requests, and at most three drivers entering any one
-decision epoch:
+The public academic experiment compares BakedBoston with a distance-first
+adaptation of Nair, Rashidi, and Dixit's food-rescue pickup-and-delivery model
+over identical five-day seeded scenarios. The bundled public replay uses nine
+fictional bakeries, nine fictional pantries, synthetic volunteer requests, and
+at most three drivers entering any one decision epoch:
 
 ```bash
 python3 -m bakedboston_optimizer.compare \
@@ -185,7 +185,7 @@ python3 -m bakedboston_optimizer.compare \
 ```
 
 Use `--disable-acceptance` for a deterministic routing-capacity sensitivity
-analysis. In the primary participation-aware experiment, the first-stage MIP
+analysis. In a participation-aware sensitivity experiment, the first-stage MIP
 uses expected acceptance while the event replay samples accept/reject outcomes
 from the same transparent behavioral assumptions. Expected acceptance and
 likely-rejection measures remain model-based diagnostics, not observed behavior.
@@ -193,20 +193,23 @@ likely-rejection measures remain model-based diagnostics, not observed behavior.
 into one network-wide Gurobi solve. The JSON contains the complete auditable
 event trace; the CSV contains one analysis-ready row per horizon and policy.
 
-The policies are Gurobi MIP, random feasible, shortest route, earliest bakery
-deadline, highest pantry priority, and best driver-destination fit. Every policy
-receives the same feasible routes and the same synthetic events. The detailed
-protocol and metric definitions are in
-[docs/simulation.md](docs/simulation.md).
+The public policies are the BakedBoston Gurobi MIP and the Nair et al. (2018)
+distance-first adaptation. The command-line runner also retains the older
+random, shortest-route, earliest-deadline, pantry-priority, and driver-fit
+heuristics for internal sensitivity work. Every model receives the same
+realized scenario and feasible routes, while each selector reads only the
+inputs represented in its formulation. The detailed protocol and metric
+definitions are in [docs/simulation.md](docs/simulation.md); the exact
+paper-adaptation boundary is in
+[docs/comparison-models.md](docs/comparison-models.md).
 
 The bundled academic comparison fixture is deliberately contention-rich: nine
 fictional bakeries, nine fictional pantries, and fewer drivers than available
-pickups force the policies to make meaningfully different choices. A fixed-seed
-regression test verifies that the Gurobi policy attains the highest declared
-system-quality value in its deterministic sensitivity analysis while the metrics still expose
-tradeoffs in completion, distance, pantry reach, and equity. A baseline may
-legitimately win an individual column; the MIP is optimal for its stated
-hierarchical objective, not for every evaluation measure simultaneously.
+pickups force the models to make meaningfully different choices. The website
+reports food recovered/wasted, direct CO₂e, average driving time/distance, and
+sigmoid-based likely acceptance/rejection alongside coverage and fairness. A
+model may legitimately win an individual measure; each is optimized only for
+its own declared objective.
 
 ## Research foundation
 

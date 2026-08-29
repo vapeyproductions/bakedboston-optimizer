@@ -64,14 +64,25 @@ simple day-ahead replay; `compare` is the primary experimental runner.
 
 ## Routing policies
 
-Every policy receives the exact same feasible candidate set. Time-window and
-location validity are therefore constraints for all policies, not advantages
-given only to BakedBoston.
+Every policy uses the exact same candidate generator and feasibility rules.
+Time-window and location validity are therefore constraints for all policies,
+not advantages given only to BakedBoston. The seeded exogenous events remain
+identical, while later available-pickup state can legitimately diverge after
+models make different earlier selections.
 
 - **BakedBoston MIP:** maximizes expected completed pickups, then retains at
   least 99% of that value while balancing normalized pantry coverage, raw and
   saved-food volume/evenness, opportunity priority, net direct CO₂e benefit,
   and driver fit.
+- **Nair et al. distance-first adaptation:** a minimal volunteer-route
+  adaptation of the periodic unpaired pickup-and-delivery model in Nair,
+  Rashidi, and Dixit (2018). It first maximizes the number of assigned
+  food-ready pickups, which is the smallest necessary relaxation of the
+  paper's mandatory-service requirement under scarce volunteers, and then
+  minimizes total route miles. It uses the driver's current position as route
+  origin plus hard search and facility-window feasibility. It does not use
+  soft time/ZIP preferences, sigmoid acceptance, pantry priority/fairness,
+  food-distribution fractions, or CO₂e to choose routes.
 - **Random feasible:** selects a seeded random conflict-free assignment.
 - **Shortest route:** greedily minimizes driving time.
 - **Earliest deadline:** greedily serves the bakery pickup with the earliest
@@ -92,7 +103,10 @@ assignment is known. A bakery assigned to another simultaneous driver is removed
 from the current driver's selectable menu. The remaining candidates are sorted
 by policy score, and the selected assignment is recorded as rank #1. Each
 decision-epoch trace therefore shows both the complete recommendation list a
-driver received and the highest-scoring route they selected.
+driver received and the highest-scoring route they selected. When a policy
+directly assigns a route rather than offering a choice menu, as in the Nair et
+al. adaptation, the assigned route itself is recorded as the driver's
+selection.
 
 ## Synthetic driver acceptance
 
@@ -131,10 +145,12 @@ The comparison report includes:
 - mean drive time, distance, preferred-destination deviation, and
   total trip duration;
 - ultimately saved food \(Q\times U\times D\), bakery food not picked up, and
-  collected food not ultimately distributed;
-- one net direct kg CO₂e result;
+  collected food not ultimately distributed, plus total food wasted as the sum
+  of those last two waste sources;
+- transport kg CO₂e, net waste-pathway kg CO₂e for landfill/pig-farm/compost,
+  total direct kg CO₂e, and net direct environmental benefit;
 - offers, accepted routes, simulated rejections, expected acceptance, likely
-  rejections, and likely-rejection rate;
+  acceptances/rejections, and their rates;
 - feasible candidates examined and the declared system-objective value; and
 - Gurobi runtime, solve status, and MIP gap.
 
@@ -157,11 +173,15 @@ different geography, and multiple defensible routing choices. This prevents a
 trivial case in which every policy makes the same assignment.
 
 The bundled five-day public replay contains nine fictional bakeries, nine
-fictional pantries, and sixty driver requests, with no more than three drivers
-entering one decision epoch. For the fixed seed used by the regression suite,
-BakedBoston's Gurobi policy has the greatest declared system-objective value and
-completes every eligible pickup. The highest-priority baseline can produce the
-lowest Gini coefficient while leaving a pickup unserved, and the earliest or
-shortest policy can reduce a route-burden component while serving fewer unique
-pantries. These are real tradeoffs, so the dashboard highlights the best value
-in each column instead of implying that the MIP must dominate every metric.
+fictional pantries, and no more than three drivers entering one decision epoch.
+Its public table compares BakedBoston with the Nair et al. distance-first
+adaptation. The older transparent heuristics remain available to the command
+line experiment runner but are intentionally excluded from the current public
+comparison while research comparators are being revised.
+
+The public replay keeps behavioral acceptance deterministic so routing choices
+can be compared without Bernoulli noise. Every menu-based driver selects rank
+1; every directly assigned route is recorded as selected. The sigmoid remains
+a post-run diagnostic that reports mean expected acceptance plus likely
+accepted/rejected shares. See [comparison-models.md](comparison-models.md) for
+the exact adaptation boundary and equations.

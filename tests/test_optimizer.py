@@ -19,6 +19,7 @@ from bakedboston_optimizer.optimizer import (
     _normalize_spatial_deviation,
     allocate_recommendation_layer,
     optimize_assignment_candidates,
+    optimize_nair_distance_first_candidates,
     optimize_network,
     rank_routes,
 )
@@ -283,6 +284,73 @@ class OptimizerTests(unittest.TestCase):
         self.assertAlmostEqual(
             result.diagnostics.expected_completed_deliveries,
             0.90,
+        )
+
+    def test_nair_adaptation_minimizes_distance_after_service_count(self) -> None:
+        long_high_score = replace(
+            self.assignment(
+                "r1", "d1", "b1", "p1", 100,
+                acceptance_probability=0.99,
+            ),
+            route=replace(
+                self.assignment("r1", "d1", "b1", "p1", 100).route,
+                route_distance_miles=12,
+                food_saved_kg=100,
+                net_environmental_benefit_kg_co2e=100,
+            ),
+        )
+        short_low_score = replace(
+            self.assignment(
+                "r1", "d1", "b2", "p2", -100,
+                acceptance_probability=0.01,
+            ),
+            route=replace(
+                self.assignment("r1", "d1", "b2", "p2", -100).route,
+                route_distance_miles=3,
+                food_saved_kg=1,
+                net_environmental_benefit_kg_co2e=-100,
+            ),
+        )
+
+        result = optimize_nair_distance_first_candidates(
+            [long_high_score, short_low_score]
+        )
+
+        self.assertEqual(result.diagnostics.matched_count, 1)
+        self.assertEqual(result.assignments[0].route.bakery_id, "b2")
+        self.assertAlmostEqual(result.diagnostics.route_distance_miles, 3)
+
+    def test_nair_adaptation_protects_cardinality_before_distance(self) -> None:
+        candidates = [
+            replace(
+                self.assignment("r1", "d1", "b1", "p1", 1),
+                route=replace(
+                    self.assignment("r1", "d1", "b1", "p1", 1).route,
+                    route_distance_miles=1,
+                ),
+            ),
+            replace(
+                self.assignment("r1", "d1", "b2", "p1", 1),
+                route=replace(
+                    self.assignment("r1", "d1", "b2", "p1", 1).route,
+                    route_distance_miles=20,
+                ),
+            ),
+            replace(
+                self.assignment("r2", "d2", "b1", "p1", 1),
+                route=replace(
+                    self.assignment("r2", "d2", "b1", "p1", 1).route,
+                    route_distance_miles=1,
+                ),
+            ),
+        ]
+
+        result = optimize_nair_distance_first_candidates(candidates)
+
+        self.assertEqual(result.diagnostics.matched_count, 2)
+        self.assertEqual(
+            {(item.request_id, item.route.bakery_id) for item in result.assignments},
+            {("r1", "b2"), ("r2", "b1")},
         )
 
     def test_route_quality_breaks_ties_between_equal_match_counts(self) -> None:

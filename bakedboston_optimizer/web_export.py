@@ -9,8 +9,8 @@ from typing import Any, Sequence
 
 from .environment import DEFAULT_ENVIRONMENTAL_ASSUMPTIONS
 from .experiment import (
-    DEFAULT_POLICIES,
     ExperimentConfig,
+    RoutingPolicy,
     compare_policies,
     estimated_postal_code,
 )
@@ -27,6 +27,53 @@ POLICY_METADATA = {
             "Maximizes expected completed assignments first, then the normalized food, fairness, "
             "environmental, and driver-fit objective across simultaneous drivers."
         ),
+        "selectionMode": "rank_one_choice",
+        "selectionDescription": (
+            "The driver chooses recommendation rank 1, the highest-scoring route "
+            "in the conflict-free menu produced after the joint assignment."
+        ),
+        "objective": (
+            "Maximize expected completed pickups, then the normalized food, fairness, "
+            "environmental, and driver-fit score within 1% of that optimum."
+        ),
+        "inputsUsed": [
+            "current driver location",
+            "hard search horizon and facility windows",
+            "requested time and ZIP-area preferences",
+            "acceptance estimate",
+            "food and pantry distribution",
+            "pantry fairness and priority",
+            "direct environmental balance",
+        ],
+        "inputsExcluded": [],
+    },
+    "nair_2018_distance_first": {
+        "label": "Nair et al. distance-first adaptation",
+        "description": (
+            "A minimal volunteer-route adaptation of the 2018 periodic unpaired "
+            "pickup-and-delivery model: protect service first, then minimize miles."
+        ),
+        "selectionMode": "direct_assignment",
+        "selectionDescription": (
+            "The model assigns one route to a driver; that assigned route is recorded "
+            "as the driver's selection."
+        ),
+        "objective": (
+            "Maximize assigned food-ready pickups, then minimize total route distance."
+        ),
+        "inputsUsed": [
+            "current driver location as route origin",
+            "hard search horizon",
+            "bakery and pantry availability windows",
+            "route distance",
+        ],
+        "inputsExcluded": [
+            "soft requested-time and ZIP preferences",
+            "acceptance probability",
+            "pantry fairness and priority",
+            "food-distribution fraction",
+            "CO2e",
+        ],
     },
     "random_feasible": {
         "label": "Random feasible",
@@ -49,6 +96,12 @@ POLICY_METADATA = {
         "description": "Greedily minimizes deviation from each driver's preferred destination.",
     },
 }
+
+
+PUBLIC_COMPARISON_POLICIES: tuple[RoutingPolicy, ...] = (
+    RoutingPolicy.BAKEDBOSTON_MIP,
+    RoutingPolicy.NAIR_2018_DISTANCE_FIRST,
+)
 
 
 def _network_payload(snapshot: NetworkSnapshot) -> dict[str, Any]:
@@ -170,7 +223,7 @@ def build_web_payload(
             max_simultaneous_drivers=max_simultaneous_drivers,
             acceptance_enabled=False,
         ),
-        policies=DEFAULT_POLICIES,
+        policies=PUBLIC_COMPARISON_POLICIES,
         travel=HaversineTravelTimeProvider(),
         weights=weights,
     )
@@ -232,14 +285,21 @@ def build_web_payload(
             ),
         },
         "metricMethodology": {
-            "actualSelection": "Every simulated driver selects recommendation rank 1.",
+            "actualSelection": (
+                "When a model offers a route menu, the simulated driver selects rank 1, "
+                "the highest-scoring route. When a model directly assigns a route, that "
+                "assigned route is recorded as the driver's selection."
+            ),
             "acceptanceModel": (
                 "Expected acceptance and likely-rejection measures are prediction-based diagnostics; "
                 "they do not override the deterministic rank-1 selection used in this demonstration."
             ),
             "comparison": (
-                "Policies share identical synthetic surplus, pantry, and driver events. A policy may "
-                "win an individual metric without maximizing the BakedBoston hierarchical objective."
+                "Both models share the exact same seeded surplus, daily food and usability draws, "
+                "pantry openings and distribution fractions, waste allocations, driver events, "
+                "facility windows, and feasible route geometry. Each selector reads only the "
+                "inputs represented in its formulation; every result is then evaluated through "
+                "the same food, environmental, travel, and acceptance ledger."
             ),
         },
     })

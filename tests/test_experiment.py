@@ -24,6 +24,7 @@ from bakedboston_optimizer.models import Location, Pantry
 from bakedboston_optimizer.network import parse_snapshot
 from bakedboston_optimizer.simulation import SimulationConfig, pantry_priority
 from bakedboston_optimizer.travel import HaversineTravelTimeProvider
+from bakedboston_optimizer.web_export import build_web_payload
 
 
 def _comparison_snapshot():
@@ -167,8 +168,14 @@ class ExperimentTests(unittest.TestCase):
                 "averagePredepartureWaitMinutes",
                 "averageTotalTripDurationMinutes",
                 "unservedPickups",
+                "foodSavedKg",
+                "foodWastedKg",
+                "transportKgCO2e",
+                "wastePathwayKgCO2e",
+                "totalDirectKgCO2e",
                 "driverAcceptanceRate",
                 "expectedDriverAcceptanceRate",
+                "likelyAcceptanceRate",
                 "likelyRejectionRate",
                 "averageSolverRuntimeSeconds",
                 "averageOptimalityGap",
@@ -180,6 +187,41 @@ class ExperimentTests(unittest.TestCase):
                 driver_ids = [item.driver_id for item in day.completed]
                 self.assertEqual(len(pickup_ids), len(set(pickup_ids)))
                 self.assertEqual(len(driver_ids), len(set(driver_ids)))
+
+    def test_public_payload_compares_only_bakedboston_and_nair_adaptation(self) -> None:
+        payload = build_web_payload(
+            self.snapshot,
+            start_date=date(2026, 8, 24),
+            days=2,
+            seed=77,
+            drivers_per_day=4,
+            matching_interval_minutes=60,
+            max_simultaneous_drivers=3,
+        )
+
+        self.assertEqual(
+            [item["policy"] for item in payload["results"]],
+            ["bakedboston_mip", "nair_2018_distance_first"],
+        )
+        self.assertEqual(
+            payload["policyMetadata"]["bakedboston_mip"]["selectionMode"],
+            "rank_one_choice",
+        )
+        self.assertEqual(
+            payload["policyMetadata"]["nair_2018_distance_first"]["selectionMode"],
+            "direct_assignment",
+        )
+        for item in payload["results"]:
+            self.assertTrue({
+                "foodSavedKg",
+                "foodWastedKg",
+                "transportKgCO2e",
+                "wastePathwayKgCO2e",
+                "totalDirectKgCO2e",
+                "expectedDriverAcceptanceRate",
+                "likelyAcceptanceRate",
+                "likelyRejectionRate",
+            }.issubset(item["metrics"]))
 
     def test_multi_horizon_report_contains_requested_horizons(self) -> None:
         result = compare_horizons(

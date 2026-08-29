@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 from zoneinfo import ZoneInfo
 
+from .environment import DEFAULT_ENVIRONMENTAL_ASSUMPTIONS
 from .models import (
     AddressValidationStatus,
     AssignmentCandidate,
@@ -35,6 +36,7 @@ from .optimizer import (
     enumerate_assignment_candidates,
     estimate_acceptance_probability,
     optimize_assignment_candidates,
+    optimize_nair_distance_first_candidates,
     solver_version,
 )
 from .simulation import (
@@ -53,6 +55,7 @@ class RoutingPolicy(StrEnum):
     """Routing strategies evaluated on the same feasible candidate set."""
 
     BAKEDBOSTON_MIP = "bakedboston_mip"
+    NAIR_2018_DISTANCE_FIRST = "nair_2018_distance_first"
     RANDOM_FEASIBLE = "random_feasible"
     SHORTEST_ROUTE = "shortest_route"
     EARLIEST_DEADLINE = "earliest_deadline"
@@ -556,6 +559,7 @@ class PolicyReport:
         gaps = [run.mip_gap for day in self.days for run in day.solver_runs if run.mip_gap is not None]
         expected_acceptances = sum(item.acceptance_probability for item in offers)
         likely_rejections = sum(item.acceptance_probability < 0.5 for item in offers)
+        likely_acceptances = len(offers) - likely_rejections
         total_route_quality = sum(item.route_score for item in completed)
         food_saved_kg = sum(item.food_saved_kg for item in completed)
         collected_not_distributed_kg = sum(item.collected_not_distributed_kg for item in completed)
@@ -564,6 +568,28 @@ class PolicyReport:
             pickup.estimated_food_kg for day in self.days for pickup in day.pickup_windows
             if (day.service_date, pickup.id) not in completed_pickups
         )
+        uncollected_waste_kg_co2e = sum(
+            pickup.estimated_food_kg
+            * (
+                pickup.waste_allocation.landfill
+                * DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.landfill_kg_co2e_per_kg_waste
+                + pickup.waste_allocation.pig_farm
+                * DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.pig_farm_kg_co2e_per_kg_waste
+                + pickup.waste_allocation.compost
+                * DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.compost_kg_co2e_per_kg_waste
+            )
+            for day in self.days
+            for pickup in day.pickup_windows
+            if (day.service_date, pickup.id) not in completed_pickups
+        )
+        residual_waste_kg_co2e = sum(
+            item.residual_waste_kg_co2e for item in completed
+        )
+        transport_kg_co2e = sum(item.transport_kg_co2e for item in completed)
+        waste_pathway_kg_co2e = (
+            uncollected_waste_kg_co2e + residual_waste_kg_co2e
+        )
+        total_direct_kg_co2e = waste_pathway_kg_co2e + transport_kg_co2e
         raw_by_pantry = {name: 0.0 for name in self.pantry_opportunities}
         saved_by_pantry = {name: 0.0 for name in self.pantry_opportunities}
         for item in completed:
@@ -590,6 +616,8 @@ class PolicyReport:
             "expectedRejectedOffers": round(len(offers) - expected_acceptances, 3),
             "offersLikelyRejected": likely_rejections,
             "likelyRejectionRate": _ratio(likely_rejections, len(offers)),
+            "offersLikelyAccepted": likely_acceptances,
+            "likelyAcceptanceRate": _ratio(likely_acceptances, len(offers)),
             "feasibleCandidatesEvaluated": sum(day.feasible_candidates for day in self.days),
             "openPantryWindows": open_pantries,
             "availablePantries": available_pantry_count,
@@ -645,6 +673,15 @@ class PolicyReport:
             "foodSavedKg": round(food_saved_kg, 3),
             "uncollectedBakeryFoodKg": round(uncollected_bakery_food_kg, 3),
             "collectedNotDistributedKg": round(collected_not_distributed_kg, 3),
+            "foodWastedKg": round(
+                uncollected_bakery_food_kg + collected_not_distributed_kg,
+                3,
+            ),
+            "uncollectedWasteKgCO2e": round(uncollected_waste_kg_co2e, 3),
+            "residualWasteKgCO2e": round(residual_waste_kg_co2e, 3),
+            "wastePathwayKgCO2e": round(waste_pathway_kg_co2e, 3),
+            "transportKgCO2e": round(transport_kg_co2e, 3),
+            "totalDirectKgCO2e": round(total_direct_kg_co2e, 3),
             "rawDonationDistributionGini": round(gini(list(raw_by_pantry.values())), 4),
             "foodSavedDistributionGini": round(gini(list(saved_by_pantry.values())), 4),
             "netEnvironmentalBenefitKgCO2e": round(
@@ -1121,9 +1158,18 @@ SUMMARY_CSV_FIELDS: tuple[str, ...] = (
     "preferredWindowFitRate",
     "averageTotalTripDurationMinutes",
     "averageElapsedFromLoginMinutes",
+    "foodSavedKg",
+    "foodWastedKg",
+    "uncollectedBakeryFoodKg",
+    "collectedNotDistributedKg",
+    "transportKgCO2e",
+    "wastePathwayKgCO2e",
+    "totalDirectKgCO2e",
+    "netEnvironmentalBenefitKgCO2e",
     "systemObjectiveValue",
     "driverAcceptanceRate",
     "expectedDriverAcceptanceRate",
+    "likelyAcceptanceRate",
     "likelyRejectionRate",
     "totalSolverRuntimeSeconds",
     "averageSolverRuntimeSeconds",
@@ -1297,6 +1343,9 @@ def _select_assignments(
     if policy == RoutingPolicy.BAKEDBOSTON_MIP:
         result = optimize_assignment_candidates(tuple(candidates), weights=weights)
         return result.assignments, result.diagnostics
+    if policy == RoutingPolicy.NAIR_2018_DISTANCE_FIRST:
+        result = optimize_nair_distance_first_candidates(tuple(candidates))
+        return result.assignments, result.diagnostics
     started = clock.perf_counter()
     key = _policy_sort_key(policy, pickups, seed, epoch)
     selected = _greedy_select(candidates, key)
@@ -1344,6 +1393,13 @@ def _policy_sort_key(
     if policy == RoutingPolicy.BAKEDBOSTON_MIP:
         return lambda item: (
             -item.route.score,
+            item.route.finish_at,
+            item.route.bakery_id,
+            item.route.pantry_id,
+        )
+    if policy == RoutingPolicy.NAIR_2018_DISTANCE_FIRST:
+        return lambda item: (
+            item.route.route_distance_miles,
             item.route.finish_at,
             item.route.bakery_id,
             item.route.pantry_id,
@@ -1834,8 +1890,12 @@ def _aggregate_metrics(values: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "averageTotalTripDurationMinutes",
         "averageElapsedFromLoginMinutes",
         "foodSavedKg",
+        "foodWastedKg",
         "uncollectedBakeryFoodKg",
         "collectedNotDistributedKg",
+        "transportKgCO2e",
+        "wastePathwayKgCO2e",
+        "totalDirectKgCO2e",
         "rawDonationDistributionGini",
         "foodSavedDistributionGini",
         "netEnvironmentalBenefitKgCO2e",
@@ -1843,6 +1903,7 @@ def _aggregate_metrics(values: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "systemObjectiveValue",
         "driverAcceptanceRate",
         "expectedDriverAcceptanceRate",
+        "likelyAcceptanceRate",
         "likelyRejectionRate",
         "unservedPickups",
         "totalSolverRuntimeSeconds",
