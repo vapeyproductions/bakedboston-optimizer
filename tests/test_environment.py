@@ -3,7 +3,10 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timezone
 
-from bakedboston_optimizer.environment import estimate_route_environmental_impact
+from bakedboston_optimizer.environment import (
+    EnvironmentalAssumptions,
+    estimate_route_environmental_impact,
+)
 from bakedboston_optimizer.models import BakeryPickup, DisposalPathway, Location
 
 
@@ -44,6 +47,7 @@ class EnvironmentalImpactTests(unittest.TestCase):
         self.assertAlmostEqual(impact.avoided_system_kg_co2e, 4.96)
         self.assertAlmostEqual(impact.transport_kg_co2e, 1.60)
         self.assertAlmostEqual(impact.residual_waste_kg_co2e, 0.40)
+        self.assertAlmostEqual(impact.net_food_saving_benefit_kg_co2e, 4.56)
         self.assertAlmostEqual(impact.net_environmental_benefit_kg_co2e, 2.96)
 
     def test_compost_counterfactual_has_smaller_avoided_disposal_credit(self) -> None:
@@ -66,6 +70,26 @@ class EnvironmentalImpactTests(unittest.TestCase):
         )
 
         self.assertLess(impact.net_environmental_benefit_kg_co2e, 0)
+
+
+    def test_equal_food_saving_and_transport_emissions_cancel(self) -> None:
+        assumptions = EnvironmentalAssumptions(
+            avoided_production_kg_co2e_per_usable_kg=1.0,
+            avoided_landfill_kg_co2e_per_diverted_kg=0.0,
+            avoided_compost_kg_co2e_per_diverted_kg=0.0,
+            redistribution_waste_kg_co2e_per_kg=0.0,
+            vehicle_kg_co2e_per_mile=1.0,
+        )
+        impact = estimate_route_environmental_impact(
+            self.pickup(10, 0.5, DisposalPathway.COMPOST),
+            route_distance_miles=5,
+            assumptions=assumptions,
+        )
+
+        self.assertAlmostEqual(impact.net_food_saving_benefit_kg_co2e, 5.0)
+        self.assertAlmostEqual(impact.transport_kg_co2e, 5.0)
+        self.assertAlmostEqual(impact.net_environmental_benefit_kg_co2e, 0.0)
+
 
 
 if __name__ == "__main__":
