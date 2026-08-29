@@ -90,7 +90,8 @@ The normalized second-stage objective is
 covering pantry reach, raw and saved-food volume/evenness, opportunity priority,
 net direct CO₂ benefit, and driver fit. See [docs/model.md](docs/model.md) for
 the full formulation and [docs/institutions.md](docs/institutions.md) for every
-fixed institution input.
+fixed institution input, waste allocation, distribution fraction, and
+environmental coefficient.
 
 Opening the app creates a decision epoch; it does not force immediate
 departure. The route generator chooses a just-in-time departure, includes 5

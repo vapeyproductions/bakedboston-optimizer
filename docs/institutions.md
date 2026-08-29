@@ -37,5 +37,37 @@ Waste columns are fixed shares and sum to 100% for each bakery.
 | Charlestown Neighborhood Pantry | 42.3785, -71.0640 | 02129 | Mon/Wed/Fri 17:45–19:00 | 18:50 | 66.1% |
 | Mission Hill Open Shelf | 42.3337, -71.1050 | 02120 | Mon–Fri 16:00–18:45 | 18:35 | 80.8% |
 
+## Fixed environmental coefficients
+
+These coefficients are applied uniformly across institutions. They are declared
+academic scenario inputs—not measurements of BakedBoston operations or of any
+named organization.
+
+| Quantity | Fixed value | Unit | Role in the primary model |
+| --- | ---: | --- | --- |
+| Landfill food-waste pathway | 0.36 | kg CO₂e / kg waste | Values the bakery no-pickup outcome and the food remaining after a completed route. |
+| Pig-farm food-waste pathway | -0.12 | kg CO₂e / kg waste | Values the corresponding share of those waste outcomes. The negative sign represents a modeled credit in the academic scenario. |
+| Compost food-waste pathway | 0.00581 | kg CO₂e / kg waste | Values the corresponding share of those waste outcomes. |
+| Transportation | 0.41947 | kg CO₂e / tonne-km | Multiplied by route tonne-kilometres and subtracted from the waste-pathway benefit. |
+| Avoided food production | 0.38 | kg CO₂e / kg food | Retained for sensitivity analysis; its primary-objective substitution fraction is fixed at 0%. |
+
+For bakery (b), the pathway coefficient is
+
+\[
+e_b=L_b(0.36)+P_b(-0.12)+C_b(0.00581).
+\]
+
+For a completed bakery–pantry route, the ultimate saved food is
+
+\[
+H_{bpd}=Q_{bd}U_{bd}D_p,
+\]
+
+the collected food not ultimately distributed is (W_{bpd}=Q_{bd}-H_{bpd}),
+and the primary direct environmental benefit is the difference between the
+bakery no-pickup waste outcome and the completed-route waste outcome, less
+transportation emissions. The full derivation and source interpretation are in
+[`model.md`](model.md) and [`research.md`](research.md).
+
 The machine-readable source of truth is
 [`data/academic_comparison_snapshot.json`](../data/academic_comparison_snapshot.json).
