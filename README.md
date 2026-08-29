@@ -168,6 +168,7 @@ excluded merely for having received food.
 
 The public academic experiment compares BakedBoston with a distance-first
 adaptation of Nair, Rashidi, and Dixit's food-rescue pickup-and-delivery model
+and a Total-Curb adaptation of Xue and Zou's carbon-aware meal-delivery model
 over identical five-day seeded scenarios. The bundled public replay uses nine
 fictional bakeries, nine fictional pantries, synthetic volunteer requests, and
 at most three drivers entering any one decision epoch:
@@ -193,14 +194,14 @@ likely-rejection measures remain model-based diagnostics, not observed behavior.
 into one network-wide Gurobi solve. The JSON contains the complete auditable
 event trace; the CSV contains one analysis-ready row per horizon and policy.
 
-The public policies are the BakedBoston Gurobi MIP and the Nair et al. (2018)
-distance-first adaptation. The command-line runner also retains the older
-random, shortest-route, earliest-deadline, pantry-priority, and driver-fit
-heuristics for internal sensitivity work. Every model receives the same
-realized scenario and feasible routes, while each selector reads only the
-inputs represented in its formulation. The detailed protocol and metric
-definitions are in [docs/simulation.md](docs/simulation.md); the exact
-paper-adaptation boundary is in
+The public policies are the BakedBoston Gurobi MIP, the Nair et al. (2018)
+distance-first adaptation, and the Xue-Zou (2025) Total-Curb adaptation. The
+command-line runner also retains the older random, shortest-route,
+earliest-deadline, pantry-priority, and driver-fit heuristics for internal
+sensitivity work. Every model receives the same realized scenario and feasible
+routes, while each selector reads only the inputs represented in its
+formulation. The detailed protocol and metric definitions are in
+[docs/simulation.md](docs/simulation.md); the exact paper-adaptation boundary is in
 [docs/comparison-models.md](docs/comparison-models.md).
 
 The bundled academic comparison fixture is deliberately contention-rich: nine
@@ -218,6 +219,10 @@ rescue routing is a new problem class:
 
 - [Nair et al. (2018)](https://doi.org/10.1016/j.seps.2017.06.003) integrate
   scheduling, assignment, and pickup-and-delivery routing for food rescue.
+- [Xue and Zou (2025)](https://doi.org/10.1016/j.clscn.2025.100253) integrate
+  order, food-waste, and vehicle emissions in open pickup-and-delivery routing;
+  the public Total-Curb adaptation isolates their total-emissions objective
+  without inventing multi-stop routes or driver-familiarity observations.
 - [Hernandez-Perez and Salazar-Gonzalez (2007)](https://doi.org/10.1002/net.20209)
   provide an exact formulation for the one-commodity pickup-and-delivery
   traveling-salesman problem, a useful structural ancestor for unpaired surplus

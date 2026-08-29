@@ -117,6 +117,80 @@ paper's depot-based, capacitated, multi-stop weekly Tabu Search implementation.
 The assigned route is recorded as the driver's selection; the model does not
 construct a driver-choice menu.
 
+## Xue and Zou (2025) Total-Curb adaptation
+
+### Source formulation
+
+Xue and Zou formulate a multiple-departure open pickup-and-delivery problem
+with delivery deadlines for small-portion meal delivery. Their Total-Curb
+mixed-integer model assigns every known restaurant-customer order and minimizes
+the sum of order-related emissions and electric-motorcycle route emissions.
+Their broader solution method uses trajectory-similarity clustering with
+driver familiarity, deadline-ordered greedy insertion, and adaptive iterative
+neighborhood search for multi-order routes.
+
+Reference: Xue, G., and Zou, S. (2025), “Optimizing carbon reduction and
+vehicle routing for small-portion meal delivery under dual carbon goals,”
+*Cleaner Logistics and Supply Chain*, 16, 100253.
+[doi:10.1016/j.clscn.2025.100253](https://doi.org/10.1016/j.clscn.2025.100253).
+
+### Necessary platform adaptation
+
+BakedBoston has one origin-bakery-pantry trip per volunteer request rather than
+multi-order restaurant-customer routes. It has no observed arc-level driver
+familiarity, meal-packaging quantities, or standard-versus-small-portion meal
+classes. Inventing those inputs or adding multi-stop routes would change the
+simulation rather than isolate the paper's primary Total-Curb routing
+objective. The comparator therefore uses the paper's total-emissions strategy
+with BakedBoston's existing direct environmental ledger and exact Gurobi solve;
+it does not claim to reproduce the paper's AINS heuristic.
+
+The source paper requires all known orders to be served. Under BakedBoston's
+scarce, request-driven volunteer fleet, the adapted model first solves
+
+\[
+\max \sum_{r \in R} x_r.
+\]
+
+For food-ready bakery pickup \(b\), let \(C_b^U\) be its fixed waste-pathway
+CO₂e if uncollected. For candidate route \(r\), let \(C_r^W\) be residual-food
+waste-pathway CO₂e after bakery usability and pantry distribution, and let
+\(C_r^T\) be transport CO₂e. Within the maximum service count, the second stage
+minimizes
+
+\[
+\sum_{b \in B} C_b^U
++ \sum_{r \in R}
+  \left(C_r^W + C_r^T - C_{b(r)}^U\right)x_r.
+\]
+
+The all-uncollected term is constant inside a decision epoch, so the
+implementation equivalently maximizes
+
+\[
+\sum_{r \in R}
+  \left(C_{b(r)}^U - C_r^W - C_r^T\right)x_r.
+\]
+
+The model uses the same request, physical-driver, and food-ready-pickup
+exclusivity constraints as the Nair comparator. The shared candidate generator
+continues to enforce current driver origin, hard search horizon, bakery pickup
+readiness/deadline, pantry receiving window/latest arrival, and route timing.
+
+The comparator uses daily bakery food/usability draws, fixed pantry
+distribution fractions, bakery waste allocations, route distance, and the
+existing fixed direct-emissions coefficients. It does **not** use:
+
+- soft requested-start or destination-ZIP fit;
+- sigmoid acceptance probability;
+- pantry fairness, opportunity priority, or coverage;
+- avoided-production credit;
+- meal preparation or packaging emissions; or
+- synthetic driver-familiarity values.
+
+The assigned route is recorded as the driver's selection. The model does not
+construct a driver-choice menu.
+
 ## Shared evaluation
 
 For every completed route from bakery \(b\) to pantry \(p\) on day \(d\), food
@@ -128,7 +202,7 @@ H_{bpd}=Q_{bd}U_{bd}D_p.
 
 Food wasted is the sum of all uncollected bakery food and the collected route
 remainder \(Q_{bd}-H_{bpd}\). Environmental reporting applies the same fixed
-landfill/pig-farm/compost and tonne-kilometre coefficients to both models and
+landfill/pig-farm/compost and tonne-kilometre coefficients to all three models and
 reports transportation CO₂e, net waste-pathway CO₂e, their total direct CO₂e,
 and net environmental benefit.
 

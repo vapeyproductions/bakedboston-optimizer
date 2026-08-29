@@ -262,8 +262,9 @@ def simulate_custom_experiment(payload: dict[str, Any]) -> dict[str, Any]:
 
     The public simulator may vary the size of the synthetic network, but every
     comparison model receives the exact same institutions, food draws, driver
-    events, and random seed. The public payload currently compares BakedBoston
-    with the Nair et al. (2018) distance-first adaptation.
+    events, and random seed. The public payload compares BakedBoston with the
+    Nair et al. (2018) distance-first adaptation and the Xue-Zou (2025)
+    Total-Curb adaptation.
     """
 
     # Public and saved academic comparisons use one consistent five-day horizon.

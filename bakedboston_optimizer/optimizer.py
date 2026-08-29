@@ -460,6 +460,223 @@ def _nair_assignment_diagnostics(
     )
 
 
+def optimize_xue_zou_total_curb_candidates(
+    candidates: list[AssignmentCandidate] | tuple[AssignmentCandidate, ...],
+) -> NetworkOptimizationResult:
+    """Solve the minimal Total-Curb adaptation of Xue and Zou (2025).
+
+    The source model requires all known pickup-delivery orders to be served and
+    minimizes total meal, waste, and vehicle emissions. BakedBoston has a
+    request-driven volunteer fleet, so the adaptation first maximizes the
+    number of assigned food-ready pickups. It then minimizes the current
+    system's direct emissions: uncollected bakery-waste emissions for pickups
+    left unassigned plus residual-waste and transport emissions for selected
+    routes. Since the all-uncollected outcome is constant within an epoch, that
+    second objective is equivalent to maximizing the direct emissions avoided
+    by selected routes.
+
+    The shared candidate generator already enforces current driver origin,
+    facility windows, and the hard search horizon. The comparator does not use
+    soft preferences, acceptance, pantry fairness or priority, avoided
+    production, meal packaging, or invented driver-familiarity values.
+    """
+
+    candidate_list = list(candidates)
+    if not candidate_list:
+        return NetworkOptimizationResult(
+            assignments=(),
+            diagnostics=SolverDiagnostics(
+                backend=(
+                    "gurobi:xue_zou_2025_total_curb_adaptation"
+                    if gp is not None
+                    else "unavailable:xue_zou_2025_total_curb_adaptation"
+                ),
+                status="no_feasible_assignments",
+                candidate_count=0,
+                matched_count=0,
+                route_quality=0.0,
+                runtime_seconds=0.0,
+            ),
+        )
+
+    utilities = {
+        _assignment_key(item): _direct_system_benefit_kg_co2e(item)
+        for item in candidate_list
+    }
+    if gp is None:
+        if not _development_fallback_enabled():
+            raise GurobiUnavailableError(
+                "Gurobi is required, but gurobipy is not installed in the optimizer runtime."
+            )
+        assignments = _exact_recommendation_layer(candidate_list, utilities)
+        assignments = tuple(sorted(
+            assignments,
+            key=lambda item: (
+                item.route.depart_at,
+                -_direct_system_benefit_kg_co2e(item),
+                item.request_id,
+            ),
+        ))
+        return NetworkOptimizationResult(
+            assignments=assignments,
+            diagnostics=_xue_zou_assignment_diagnostics(
+                candidate_list,
+                assignments,
+                backend="development_exact:xue_zou_2025_total_curb_adaptation",
+                status="fallback",
+                runtime_seconds=0.0,
+            ),
+        )
+
+    with _SOLVER_LOCK:
+        model = _model("xue_zou_2025_total_curb_adaptation")
+        try:
+            route_vars = {
+                index: model.addVar(vtype=GRB.BINARY, name=f"assign_{index}")
+                for index in range(len(candidate_list))
+            }
+            for request_id in sorted({item.request_id for item in candidate_list}):
+                model.addConstr(
+                    gp.quicksum(
+                        route_vars[index]
+                        for index, item in enumerate(candidate_list)
+                        if item.request_id == request_id
+                    ) <= 1,
+                    name=f"request_{_safe_name(request_id)}_at_most_once",
+                )
+            for driver_id in sorted({item.driver_id for item in candidate_list}):
+                model.addConstr(
+                    gp.quicksum(
+                        route_vars[index]
+                        for index, item in enumerate(candidate_list)
+                        if item.driver_id == driver_id
+                    ) <= 1,
+                    name=f"driver_{_safe_name(driver_id)}_at_most_once",
+                )
+            for pickup_id in sorted({item.route.bakery_id for item in candidate_list}):
+                model.addConstr(
+                    gp.quicksum(
+                        route_vars[index]
+                        for index, item in enumerate(candidate_list)
+                        if item.route.bakery_id == pickup_id
+                    ) <= 1,
+                    name=f"pickup_{_safe_name(pickup_id)}_at_most_once",
+                )
+
+            model.ModelSense = GRB.MAXIMIZE
+            model.setObjectiveN(
+                gp.quicksum(route_vars.values()),
+                index=0,
+                priority=2,
+                weight=1.0,
+                name="maximize_served_food_ready_pickups",
+            )
+            model.setObjectiveN(
+                gp.quicksum(
+                    utilities[_assignment_key(item)] * route_vars[index]
+                    for index, item in enumerate(candidate_list)
+                ),
+                index=1,
+                priority=1,
+                weight=1.0,
+                name="minimize_total_direct_system_co2e",
+            )
+            model.optimize()
+            if (
+                model.Status not in {GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.TIME_LIMIT}
+                or model.SolCount < 1
+            ):
+                raise RuntimeError(
+                    "Gurobi could not solve the Xue-Zou Total-Curb adaptation "
+                    f"(status {model.Status})."
+                )
+            assignments = tuple(
+                item
+                for index, item in enumerate(candidate_list)
+                if route_vars[index].X > 0.5
+            )
+            assignments = tuple(sorted(
+                assignments,
+                key=lambda item: (
+                    item.route.depart_at,
+                    -_direct_system_benefit_kg_co2e(item),
+                    item.request_id,
+                ),
+            ))
+            return NetworkOptimizationResult(
+                assignments=assignments,
+                diagnostics=_xue_zou_assignment_diagnostics(
+                    candidate_list,
+                    assignments,
+                    backend="gurobi:xue_zou_2025_total_curb_adaptation",
+                    status=_status_name(model.Status),
+                    runtime_seconds=float(model.Runtime),
+                    mip_gap=_optional_float_attribute(model, "MIPGap"),
+                ),
+            )
+        finally:
+            model.dispose()
+
+
+def _direct_system_benefit_kg_co2e(candidate: AssignmentCandidate) -> float:
+    """Return direct waste-pathway emissions avoided minus route transport."""
+
+    route = candidate.route
+    return (
+        route.counterfactual_waste_kg_co2e
+        - route.residual_waste_kg_co2e
+        - route.transport_kg_co2e
+    )
+
+
+def _xue_zou_assignment_diagnostics(
+    candidates: Sequence[AssignmentCandidate],
+    assignments: Sequence[AssignmentCandidate],
+    *,
+    backend: str,
+    status: str,
+    runtime_seconds: float,
+    mip_gap: float | None = None,
+) -> SolverDiagnostics:
+    """Report the Total-Curb objective and common post-hoc impact ledger."""
+
+    return SolverDiagnostics(
+        backend=backend,
+        status=status,
+        candidate_count=len(candidates),
+        matched_count=len(assignments),
+        route_quality=sum(
+            _direct_system_benefit_kg_co2e(item) for item in assignments
+        ),
+        runtime_seconds=runtime_seconds,
+        mip_gap=mip_gap,
+        expected_completed_deliveries=sum(
+            item.route.acceptance_probability for item in assignments
+        ),
+        route_distance_miles=sum(
+            item.route.route_distance_miles for item in assignments
+        ),
+        estimated_food_kg=sum(item.route.estimated_food_kg for item in assignments),
+        usable_food_kg=sum(item.route.usable_food_kg for item in assignments),
+        food_saved_kg=sum(item.route.food_saved_kg for item in assignments),
+        collected_not_distributed_kg=sum(
+            item.route.collected_not_distributed_kg for item in assignments
+        ),
+        avoided_system_kg_co2e=sum(
+            item.route.avoided_system_kg_co2e for item in assignments
+        ),
+        transport_kg_co2e=sum(
+            item.route.transport_kg_co2e for item in assignments
+        ),
+        residual_waste_kg_co2e=sum(
+            item.route.residual_waste_kg_co2e for item in assignments
+        ),
+        net_environmental_benefit_kg_co2e=sum(
+            item.route.net_environmental_benefit_kg_co2e for item in assignments
+        ),
+    )
+
+
 def allocate_recommendation_layer(
     candidates: Sequence[AssignmentCandidate],
     utilities: dict[tuple[str, str, str], float] | None = None,

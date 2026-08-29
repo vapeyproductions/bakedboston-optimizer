@@ -75,6 +75,39 @@ POLICY_METADATA = {
             "CO2e",
         ],
     },
+    "xue_zou_2025_total_curb": {
+        "label": "Xue–Zou Total-Curb adaptation",
+        "description": (
+            "A minimal volunteer-route adaptation of the 2025 Total-Curb model: "
+            "protect service first, then minimize total direct system CO2e."
+        ),
+        "selectionMode": "direct_assignment",
+        "selectionDescription": (
+            "The model assigns one route to a driver; that assigned route is recorded "
+            "as the driver's selection."
+        ),
+        "objective": (
+            "Maximize assigned food-ready pickups, then minimize uncollected waste, "
+            "selected-route residual waste, and transportation CO2e."
+        ),
+        "inputsUsed": [
+            "current driver location as route origin",
+            "hard search horizon",
+            "bakery and pantry availability windows",
+            "daily bakery food and usability",
+            "pantry distribution fraction",
+            "bakery waste allocation",
+            "route distance and fixed direct-emissions coefficients",
+        ],
+        "inputsExcluded": [
+            "soft requested-time and ZIP preferences",
+            "acceptance probability",
+            "pantry fairness, priority, and coverage",
+            "avoided production",
+            "meal preparation and packaging emissions",
+            "unobserved driver familiarity",
+        ],
+    },
     "random_feasible": {
         "label": "Random feasible",
         "description": "Chooses randomly from routes that satisfy the same timing constraints.",
@@ -101,6 +134,7 @@ POLICY_METADATA = {
 PUBLIC_COMPARISON_POLICIES: tuple[RoutingPolicy, ...] = (
     RoutingPolicy.BAKEDBOSTON_MIP,
     RoutingPolicy.NAIR_2018_DISTANCE_FIRST,
+    RoutingPolicy.XUE_ZOU_2025_TOTAL_CURB,
 )
 
 
@@ -292,10 +326,10 @@ def build_web_payload(
             ),
             "acceptanceModel": (
                 "Expected acceptance and likely-rejection measures are prediction-based diagnostics; "
-                "they do not override the deterministic rank-1 selection used in this demonstration."
+                "they do not override the deterministic recorded selection used in this demonstration."
             ),
             "comparison": (
-                "Both models share the exact same seeded surplus, daily food and usability draws, "
+                "All models share the exact same seeded surplus, daily food and usability draws, "
                 "pantry openings and distribution fractions, waste allocations, driver events, "
                 "facility windows, and feasible route geometry. Each selector reads only the "
                 "inputs represented in its formulation; every result is then evaluated through "

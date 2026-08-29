@@ -21,6 +21,7 @@ from bakedboston_optimizer.optimizer import (
     optimize_assignment_candidates,
     optimize_nair_distance_first_candidates,
     optimize_network,
+    optimize_xue_zou_total_curb_candidates,
     rank_routes,
 )
 from bakedboston_optimizer.google_maps import _duration_minutes
@@ -346,6 +347,80 @@ class OptimizerTests(unittest.TestCase):
         ]
 
         result = optimize_nair_distance_first_candidates(candidates)
+
+        self.assertEqual(result.diagnostics.matched_count, 2)
+        self.assertEqual(
+            {(item.request_id, item.route.bakery_id) for item in result.assignments},
+            {("r1", "b2"), ("r2", "b1")},
+        )
+
+    def test_xue_zou_total_curb_minimizes_direct_system_emissions(self) -> None:
+        lower_direct_emissions = replace(
+            self.assignment(
+                "r1", "d1", "b1", "p1", -100,
+                acceptance_probability=0.01,
+            ),
+            route=replace(
+                self.assignment("r1", "d1", "b1", "p1", -100).route,
+                route_distance_miles=12,
+                counterfactual_waste_kg_co2e=10,
+                residual_waste_kg_co2e=1,
+                transport_kg_co2e=2,
+            ),
+        )
+        higher_direct_emissions = replace(
+            self.assignment(
+                "r1", "d1", "b2", "p2", 100,
+                acceptance_probability=0.99,
+            ),
+            route=replace(
+                self.assignment("r1", "d1", "b2", "p2", 100).route,
+                route_distance_miles=1,
+                counterfactual_waste_kg_co2e=10,
+                residual_waste_kg_co2e=8,
+                transport_kg_co2e=0.5,
+            ),
+        )
+
+        result = optimize_xue_zou_total_curb_candidates(
+            [lower_direct_emissions, higher_direct_emissions]
+        )
+
+        self.assertEqual(result.diagnostics.matched_count, 1)
+        self.assertEqual(result.assignments[0].route.bakery_id, "b1")
+        self.assertAlmostEqual(result.diagnostics.route_quality, 7)
+
+    def test_xue_zou_total_curb_protects_cardinality_before_emissions(self) -> None:
+        def with_direct_benefit(
+            candidate: AssignmentCandidate,
+            benefit: float,
+        ) -> AssignmentCandidate:
+            return replace(
+                candidate,
+                route=replace(
+                    candidate.route,
+                    counterfactual_waste_kg_co2e=max(0, benefit),
+                    residual_waste_kg_co2e=max(0, -benefit),
+                    transport_kg_co2e=0,
+                ),
+            )
+
+        candidates = [
+            with_direct_benefit(
+                self.assignment("r1", "d1", "b1", "p1", 1),
+                100,
+            ),
+            with_direct_benefit(
+                self.assignment("r1", "d1", "b2", "p1", 1),
+                -100,
+            ),
+            with_direct_benefit(
+                self.assignment("r2", "d2", "b1", "p1", 1),
+                100,
+            ),
+        ]
+
+        result = optimize_xue_zou_total_curb_candidates(candidates)
 
         self.assertEqual(result.diagnostics.matched_count, 2)
         self.assertEqual(

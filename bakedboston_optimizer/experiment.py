@@ -37,6 +37,7 @@ from .optimizer import (
     estimate_acceptance_probability,
     optimize_assignment_candidates,
     optimize_nair_distance_first_candidates,
+    optimize_xue_zou_total_curb_candidates,
     solver_version,
 )
 from .simulation import (
@@ -56,6 +57,7 @@ class RoutingPolicy(StrEnum):
 
     BAKEDBOSTON_MIP = "bakedboston_mip"
     NAIR_2018_DISTANCE_FIRST = "nair_2018_distance_first"
+    XUE_ZOU_2025_TOTAL_CURB = "xue_zou_2025_total_curb"
     RANDOM_FEASIBLE = "random_feasible"
     SHORTEST_ROUTE = "shortest_route"
     EARLIEST_DEADLINE = "earliest_deadline"
@@ -1346,6 +1348,9 @@ def _select_assignments(
     if policy == RoutingPolicy.NAIR_2018_DISTANCE_FIRST:
         result = optimize_nair_distance_first_candidates(tuple(candidates))
         return result.assignments, result.diagnostics
+    if policy == RoutingPolicy.XUE_ZOU_2025_TOTAL_CURB:
+        result = optimize_xue_zou_total_curb_candidates(tuple(candidates))
+        return result.assignments, result.diagnostics
     started = clock.perf_counter()
     key = _policy_sort_key(policy, pickups, seed, epoch)
     selected = _greedy_select(candidates, key)
@@ -1400,6 +1405,17 @@ def _policy_sort_key(
     if policy == RoutingPolicy.NAIR_2018_DISTANCE_FIRST:
         return lambda item: (
             item.route.route_distance_miles,
+            item.route.finish_at,
+            item.route.bakery_id,
+            item.route.pantry_id,
+        )
+    if policy == RoutingPolicy.XUE_ZOU_2025_TOTAL_CURB:
+        return lambda item: (
+            -(
+                item.route.counterfactual_waste_kg_co2e
+                - item.route.residual_waste_kg_co2e
+                - item.route.transport_kg_co2e
+            ),
             item.route.finish_at,
             item.route.bakery_id,
             item.route.pantry_id,

@@ -188,7 +188,7 @@ class ExperimentTests(unittest.TestCase):
                 self.assertEqual(len(pickup_ids), len(set(pickup_ids)))
                 self.assertEqual(len(driver_ids), len(set(driver_ids)))
 
-    def test_public_payload_compares_only_bakedboston_and_nair_adaptation(self) -> None:
+    def test_public_payload_compares_three_declared_academic_models(self) -> None:
         payload = build_web_payload(
             self.snapshot,
             start_date=date(2026, 8, 24),
@@ -201,7 +201,11 @@ class ExperimentTests(unittest.TestCase):
 
         self.assertEqual(
             [item["policy"] for item in payload["results"]],
-            ["bakedboston_mip", "nair_2018_distance_first"],
+            [
+                "bakedboston_mip",
+                "nair_2018_distance_first",
+                "xue_zou_2025_total_curb",
+            ],
         )
         self.assertEqual(
             payload["policyMetadata"]["bakedboston_mip"]["selectionMode"],
@@ -209,6 +213,10 @@ class ExperimentTests(unittest.TestCase):
         )
         self.assertEqual(
             payload["policyMetadata"]["nair_2018_distance_first"]["selectionMode"],
+            "direct_assignment",
+        )
+        self.assertEqual(
+            payload["policyMetadata"]["xue_zou_2025_total_curb"]["selectionMode"],
             "direct_assignment",
         )
         for item in payload["results"]:

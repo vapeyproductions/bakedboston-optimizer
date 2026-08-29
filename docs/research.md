@@ -18,6 +18,7 @@ results.
 | --- | --- | --- | --- |
 | Food-rescue scheduling and routing | Joint scheduling, assignment, pickup-and-delivery routing, cost, and service levels | Timed driver–bakery–pantry route columns, hard pickup/receiving windows, one-use bakery occurrences | Adapted and implemented |
 | Nair et al. (2018) comparison model | Mandatory food-rescue service followed by transportation-cost minimization | Public comparator maximizes assigned food-ready pickups, then minimizes miles using current volunteer origins and hard timing feasibility | Distance-first adaptation implemented; not a full PU-PDVRP/Tabu Search replication |
+| Xue and Zou (2025) comparison model | Total-Curb open pickup-and-delivery routing minimizes order, waste, and vehicle emissions | Public comparator maximizes assigned food-ready pickups, then minimizes the existing direct system CO₂e ledger | Total-Curb objective adapted and implemented; not a multi-order AINS or driver-familiarity replication |
 | Pickup-and-delivery routing | Exact network formulations for compatible pickup and delivery movements | Binary route-column variables with driver and bakery exclusivity | Adapted and implemented |
 | Equitable charitable distribution | Equity and service continuity alongside travel efficiency | Opportunity-based pantry priority, coverage, never-served share, Gini coefficient, and service gap | Adapted and implemented |
 | Online routing with occasional drivers | Rolling decisions instead of one static fleet plan | Seeded driver-arrival epochs and re-optimization over pickups still available | Adapted and implemented |
@@ -49,6 +50,20 @@ results.
   [doi:10.1002/net.20209](https://doi.org/10.1002/net.20209). This is a
   structural ancestor for unpaired surplus pickup and delivery; BakedBoston
   uses route columns rather than reproducing its full arc formulation.
+
+### Carbon-aware meal delivery routing
+
+- Xue and Zou (2025), “Optimizing carbon reduction and vehicle routing for
+  small-portion meal delivery under dual carbon goals,” *Cleaner Logistics and
+  Supply Chain*, 16, 100253.
+  [doi:10.1016/j.clscn.2025.100253](https://doi.org/10.1016/j.clscn.2025.100253).
+  Their Total-Curb model minimizes meal, waste, and vehicle emissions for open
+  multi-order pickup-and-delivery routes. BakedBoston's deliberately narrow
+  comparator preserves that total-direct-emissions strategy within its current
+  one-bakery/one-pantry volunteer route contract. It does not invent the
+  paper's packaging, meal-class, arc-familiarity, or multi-stop inputs and does
+  not claim to reproduce the AINS heuristic. See
+  [comparison-models.md](comparison-models.md) for the adapted equations.
 
 ### Fairness and charitable distribution
 
