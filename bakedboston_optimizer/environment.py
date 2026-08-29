@@ -39,6 +39,12 @@ class EnvironmentalImpact:
     residual_waste_kg_co2e: float
     net_environmental_benefit_kg_co2e: float
 
+    @property
+    def net_food_saving_benefit_kg_co2e(self) -> float:
+        """Food-system benefit before transportation is considered."""
+
+        return self.avoided_system_kg_co2e - self.residual_waste_kg_co2e
+
 
 DEFAULT_ENVIRONMENTAL_ASSUMPTIONS = EnvironmentalAssumptions()
 
@@ -50,10 +56,16 @@ def estimate_route_environmental_impact(
 ) -> EnvironmentalImpact:
     """Estimate net lifecycle CO2e benefit for one feasible delivery route.
 
-    Positive values represent estimated avoided emissions.  The estimate credits
-    usable food for displaced production and all donated food for avoided donor
-    disposal, then subtracts driving emissions and emissions from food that
-    enters the redistribution chain but is not usable.
+    Positive values represent estimated avoided emissions. The calculation first
+    nets avoided production and donor disposal against residual redistribution
+    waste to obtain the food-saving benefit. It then subtracts route
+    transportation emissions in the same unit (kg CO2e):
+
+        net environmental benefit = net food-saving benefit - transport emissions
+
+    This is a signed term, not a threshold rule. Equal values cancel to zero;
+    food-saving benefits larger than transport are rewarded, while routes whose
+    transport emissions exceed their food-saving benefits are penalized.
     """
 
     if route_distance_miles < 0:
@@ -76,7 +88,8 @@ def estimate_route_environmental_impact(
     residual_waste = (
         residual_waste_kg * assumptions.redistribution_waste_kg_co2e_per_kg
     )
-    net_benefit = avoided_system - transport - residual_waste
+    net_food_saving_benefit = avoided_system - residual_waste
+    net_benefit = net_food_saving_benefit - transport
 
     return EnvironmentalImpact(
         estimated_food_kg=food_kg,
