@@ -17,9 +17,9 @@ No shortcut policy is used to decide which candidates the MIP is allowed to see.
 The MIP does not equate a login with a departure. Before optimization, the
 candidate generator creates a timed route column
 
-\[
+$$
 a=(d,b,p,t^{depart},t^{pickup},t^{arrival},t^{finish})
-\]
+$$
 
 for each useful driver–bakery–pantry schedule. A column therefore contains the
 complete plan: when the driver should leave, when pickup occurs, when pantry
@@ -29,17 +29,17 @@ and retains the best feasible timed plan for each driver–bakery–pantry
 combination. Larger instances could generate these columns dynamically with
 column generation.
 
-- \(D\): synthetic driver requests
-- \(B\): simulated bakery-surplus occurrences
-- \(P\): eligible pantry receiving-window occurrences
-- \(A\): feasible timed route columns
-- \(x_a \in \{0,1\}\): 1 when timed route column \(a\) is selected
+- $D$: synthetic driver requests
+- $B$: simulated bakery-surplus occurrences
+- $P$: eligible pantry receiving-window occurrences
+- $A$: feasible timed route columns
+- $x_a \in \{0,1\}$: 1 when timed route column $a$ is selected
 
 Each pantry window is represented as a time-specific occurrence. An unattended window is treated as open in the experiment; attendance at a staffed window is a seeded synthetic event.
 
 ## Timing and feasibility
 
-For every potential \((d,b,p)\), the feasibility engine treats the driver's
+For every potential $(d,b,p)$, the feasibility engine treats the driver's
 login as a **decision epoch**, not a required departure. It evaluates a finite
 set of useful departure breakpoints and propagates:
 
@@ -52,7 +52,7 @@ set of useful departure breakpoints and propagates:
 7. 5 minutes for drop-off.
 
 The model uses fixed 5-minute pickup and 5-minute drop-off service times. The
-assignment enters \(A\) only if:
+assignment enters $A$ only if:
 
 - the driver can reach the bakery by its pickup deadline;
 - the pantry is open and the delivery arrives by its latest permitted arrival;
@@ -64,11 +64,11 @@ assignment enters \(A\) only if:
 
 ## Pantry priority
 
-The fairness metric uses the last \(N\) open receiving opportunities. Let \(n_p\) be the number of recent opportunities and \(served_p\) the number that received at least one simulated assignment:
+The fairness metric uses the last $N$ open receiving opportunities. Let $n_p$ be the number of recent opportunities and $served_p$ the number that received at least one simulated assignment:
 
-\[
+$$
 priority_p = 1 - \frac{served_p + 1}{n_p + 2}
-\]
+$$
 
 Laplace smoothing gives a pantry with no recorded opportunities a neutral priority of 0.5. Missed opportunities raise priority, while recent service lowers it. A pantry always remains feasible, so a nearby lower-priority pantry can still be selected rather than discarding a viable pickup.
 
@@ -85,54 +85,54 @@ outside those areas; an exact match has zero deviation and receives no bonus.
 
 ## Food and environmental accounting
 
-Each bakery \(b\) has fixed triangular distributions for daily food amount
-\(Q_{bd}\) and usability \(U_{bd}\). Their parameters do not change between
+Each bakery $b$ has fixed triangular distributions for daily food amount
+$Q_{bd}$ and usability $U_{bd}$. Their parameters do not change between
 runs; the seed and occurrence ID determine the reproducible daily draws. Each
-pantry \(p\) has a fixed distribution fraction \(D_p\). A selected route's
+pantry $p$ has a fixed distribution fraction $D_p$. A selected route's
 ultimately saved food is
 
-\[
+$$
 H_{bpd}=Q_{bd}U_{bd}D_p.
-\]
+$$
 
-If a food-available bakery occurrence is not picked up, all \(Q_{bd}\) is
+If a food-available bakery occurrence is not picked up, all $Q_{bd}$ is
 recorded as uncollected bakery food. If it is picked up, the model records
 
-\[
+$$
 W_{bpd}=Q_{bd}-H_{bpd}
-\]
+$$
 
 as collected food that is not ultimately distributed. Each bakery has fixed
-landfill, pig-farm, and compost shares \((L_b,P_b,C_b)\), which sum to one. With
-pathway coefficients \((e_L,e_P,e_C)=(0.36,-0.12,0.00581)\) kg CO₂e/kg waste,
-define \(e_b=L_be_L+P_be_P+C_be_C\). The no-pickup result is \(Q_{bd}e_b\) and
-the completed-route waste result is \(W_{bpd}e_b\).
+landfill, pig-farm, and compost shares $(L_b,P_b,C_b)$, which sum to one. With
+pathway coefficients $(e_L,e_P,e_C)=(0.36,-0.12,0.00581)$ kg CO₂e/kg waste,
+define $e_b=L_be_L+P_be_P+C_be_C$. The no-pickup result is $Q_{bd}e_b$ and
+the completed-route waste result is $W_{bpd}e_b$.
 
 Transportation uses 0.41947 kg CO₂e/tonne-km:
 
-\[
+$$
 T_r=0.41947\left(\frac{Q_{bd}}{1000}\right)(1.60934\,miles_r).
-\]
+$$
 
-The environmental coefficient is \(E_r=(Q_{bd}-W_{bpd})e_b-T_r\). The primary
+The environmental coefficient is $E_r=(Q_{bd}-W_{bpd})e_b-T_r$. The primary
 score conservatively sets avoided-production substitution to zero; the declared
 0.38 kg CO₂e/kg food coefficient remains available for sensitivity analysis.
 These are paper-derived scenario values, not a measured BakedBoston carbon
 inventory. Fixed inputs are listed in [institutions.md](institutions.md).
 
 Driver fit is one minus the mean normalized drive-time, requested-window, and
-spatial burdens, with each burden clipped to \([0,1]\).
+spatial burdens, with each burden clipped to $[0,1]$.
 
 More precisely:
 
-\[
+$$
 outsideMinutes = \max(0, requestedStart-departure)
 + \max(0, finish-requestedFinish)
-\]
+$$
 
-\[
+$$
 outsideWindowRatio = \frac{outsideMinutes}{requestedWindowMinutes}
-\]
+$$
 
 The request interval must be at least 30 minutes. Waiting between login and a
 planned later departure is displayed to the driver but does not reduce route
@@ -142,15 +142,15 @@ For example, a 30-minute miss against a 30-minute request has ratio 1.0 and a
 24-point penalty; a 10-minute miss against a four-hour request has ratio
 10/240 and only a 1-point penalty.
 
-For route \(r=(d,b,p)\), define the raw spatial misses:
+For route $r=(d,b,p)$, define the raw spatial misses:
 
-\[
+$$
 \delta^{start}_r = \max\{0,\ distance(b,startZIP_d)-radius^{start}_d\}
-\]
+$$
 
-\[
+$$
 \delta^{end}_r = \max\{0,\ distance(p,endZIP_d)-radius^{end}_d\}
-\]
+$$
 
 The distance is measured to the closest edge of the estimated ZIP circle, so a
 facility inside the area has a zero-mile miss. For each driver request, each
@@ -158,7 +158,7 @@ applicable miss is divided by the largest miss of that type among the driver's
 feasible routes. The final `spatialDeviationRatio` is the mean of the available
 normalized components. If every alternative has zero deviation for one
 component, that component contributes zero. This creates a relative penalty in
-\([0,1]\), favors the closest alternatives, and never rewards an exact match.
+$[0,1]$, favors the closest alternatives, and never rewards an exact match.
 
 Distance enters environmental accounting through tonne-kilometres and driver
 fit through a normalized time burden. There is no separate generic mileage
@@ -170,22 +170,22 @@ Technical feasibility does not guarantee that a volunteer would accept a
 route. Each feasible route therefore receives an estimated acceptance
 probability:
 
-\[
+$$
 a_r = \sigma(\theta_0
 - \theta_t driveMinutes_r
 - \theta_w outsideWindowRatio_r
 - \theta_s spatialDeviationRatio_r)
-\]
+$$
 
 with the current academic scenario parameters
 
-\[
+$$
 (\theta_0,\theta_t,\theta_w,\theta_s)=(2.2,0.045,1.8,1.1).
-\]
+$$
 
 The estimate falls when a route requires more driving or fits the volunteer's
 requested time and geography less closely. The estimate is clipped to
-\([0.02,0.98]\) for stable scenario analysis. It is intentionally simple,
+$[0.02,0.98]$ for stable scenario analysis. It is intentionally simple,
 inspectable, and replaceable. These coefficients are synthetic assumptions,
 not learned from volunteer behavior and not validated probabilities.
 
@@ -194,27 +194,27 @@ not learned from volunteer behavior and not validated probabilities.
 The Gurobi model uses two ordered objectives. First, maximize the expected
 number of completed pickups:
 
-\[
+$$
 Z_1 = \max \sum_{a \in A} a_a x_a
-\]
+$$
 
-where \(a_a\) is the estimated acceptance probability of timed route column
-\(a\). A technically feasible assignment with low predicted acceptance can
+where $a_a$ is the estimated acceptance probability of timed route column
+$a$. A technically feasible assignment with low predicted acceptance can
 therefore lose to a more volunteer-compatible assignment with greater expected
 completion.
 
 Second, among solutions retaining at least 99% of the optimal first-stage
 value, maximize a normalized 100-point score:
 
-\[
+$$
 Z_2=10C+10V_Q+10F_Q+10V_H+10F_H+10P+20E+20D.
-\]
+$$
 
-Every component lies in \([0,1]\): pantry coverage \(C\), selected raw-food
-volume \(V_Q\), cumulative raw-food evenness \(F_Q\), ultimately saved-food
-volume \(V_H\), cumulative saved-food evenness \(F_H\), opportunity priority
-\(P\), min–max-normalized direct environmental benefit \(E\), and normalized
-driver fit \(D\). Priority and the per-route environmental and driver-fit
+Every component lies in $[0,1]$: pantry coverage $C$, selected raw-food
+volume $V_Q$, cumulative raw-food evenness $F_Q$, ultimately saved-food
+volume $V_H$, cumulative saved-food evenness $F_H$, opportunity priority
+$P$, min–max-normalized direct environmental benefit $E$, and normalized
+driver fit $D$. Priority and the per-route environmental and driver-fit
 values are summed over selected routes and divided by the epoch's maximum
 feasible assignment count. Binary pantry-visit variables model coverage;
 auxiliary continuous variables linearize pairwise absolute pantry food-balance
@@ -255,21 +255,21 @@ paper's full algorithm.
 
 Each driver request receives at most one assignment:
 
-\[
+$$
 \sum_{a \in A:\,driverRequest(a)=d} x_a \leq 1 \qquad \forall d \in D
-\]
+$$
 
 Each physical driver receives at most one simultaneous assignment, even if multiple active requests exist:
 
-\[
+$$
 \sum_{a \in A:\,driver(a)=v} x_a \leq 1 \qquad \forall v
-\]
+$$
 
 Each bakery pickup can be assigned only once:
 
-\[
+$$
 \sum_{a \in A:\,pickup(a)=b} x_a \leq 1 \qquad \forall b \in B
-\]
+$$
 
 There is intentionally no one-delivery capacity constraint on pantries. A pantry may receive multiple orders while its window is open.
 

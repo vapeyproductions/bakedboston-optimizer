@@ -51,19 +51,19 @@ named organization.
 | Transportation | 0.41947 | kg CO₂e / tonne-km | Multiplied by route tonne-kilometres and subtracted from the waste-pathway benefit. |
 | Avoided food production | 0.38 | kg CO₂e / kg food | Retained for sensitivity analysis; its primary-objective substitution fraction is fixed at 0%. |
 
-For bakery (b), the pathway coefficient is
+For bakery $b$, the pathway coefficient is
 
-\[
+$$
 e_b=L_b(0.36)+P_b(-0.12)+C_b(0.00581).
-\]
+$$
 
 For a completed bakery–pantry route, the ultimate saved food is
 
-\[
+$$
 H_{bpd}=Q_{bd}U_{bd}D_p,
-\]
+$$
 
-the collected food not ultimately distributed is (W_{bpd}=Q_{bd}-H_{bpd}),
+the collected food not ultimately distributed is $W_{bpd}=Q_{bd}-H_{bpd}$,
 and the primary direct environmental benefit is the difference between the
 bakery no-pickup waste outcome and the completed-route waste outcome, less
 transportation emissions. The full derivation and source interpretation are in

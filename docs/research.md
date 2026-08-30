@@ -146,7 +146,7 @@ results.
   and shorter direct transport.
 
   BakedBoston adapts that structure using fixed bakery waste mixes, pantry
-  distribution fractions, and \(H=Q\times U\times D\). The public simulator
+  distribution fractions, and $H=Q\times U\times D$. The public simulator
   reports food saved, bakery food not picked up, collected food not ultimately
   distributed, and one net direct CO₂e result. These are declared scenario
   coefficients, not a verified carbon inventory.

@@ -23,16 +23,16 @@ adding BakedBoston-specific objectives to a comparison model.
 
 ## BakedBoston
 
-BakedBoston uses binary route-column decisions \(y_r\). Its first objective
+BakedBoston uses binary route-column decisions $x_r$. Its first objective
 maximizes expected completed pickups:
 
-\[
-A^* = \max \sum_{r \in R} a_r y_r.
-\]
+$$
+A^* = \max \sum_{r \in R} a_r x_r.
+$$
 
 Its second objective balances normalized food volume/evenness, pantry coverage
 and priority, direct net environmental benefit, and driver fit while retaining
-at least 99% of \(A^*\). The complete formulation is in
+at least 99% of $A^*$. The complete formulation is in
 [model.md](model.md).
 
 BakedBoston is treated as a route-choice policy in the public replay. After the
@@ -64,39 +64,39 @@ simulation beyond the available evidence. The comparison therefore preserves
 the paper's service-first, distance-minimizing logic within BakedBoston's actual
 route contract.
 
-For candidate route \(r\), let \(x_r\) be 1 when it is assigned. The adapted
+For candidate route $r$, let $x_r$ be 1 when it is assigned. The adapted
 model solves the following lexicographic objectives:
 
-\[
+$$
 \max \sum_{r \in R} x_r
-\]
+$$
 
 followed by
 
-\[
+$$
 \min \sum_{r \in R} m_r x_r,
-\]
+$$
 
-where \(m_r\) is route distance from the driver's current position to the
+where $m_r$ is route distance from the driver's current position to the
 bakery and then the pantry. Maximizing assignment count is the minimum required
 relaxation of the paper's mandatory-node service when the realized volunteer
 fleet cannot serve every food-ready bakery.
 
 The model enforces:
 
-\[
+$$
 \sum_{r \in R(q)} x_r \le 1 \quad \forall\text{ driver request }q,
-\]
+$$
 
-\[
+$$
 \sum_{r \in R(d)} x_r \le 1 \quad \forall\text{ physical driver }d,
-\]
+$$
 
 and
 
-\[
+$$
 \sum_{r \in R(b)} x_r \le 1 \quad \forall\text{ food-ready bakery occurrence }b.
-\]
+$$
 
 The shared candidate generator enforces driver origin, hard search horizon,
 bakery pickup readiness/deadline, pantry receiving window/latest arrival, and
@@ -148,29 +148,29 @@ it does not claim to reproduce the paper's AINS heuristic.
 The source paper requires all known orders to be served. Under BakedBoston's
 scarce, request-driven volunteer fleet, the adapted model first solves
 
-\[
+$$
 \max \sum_{r \in R} x_r.
-\]
+$$
 
-For food-ready bakery pickup \(b\), let \(C_b^U\) be its fixed waste-pathway
-CO₂e if uncollected. For candidate route \(r\), let \(C_r^W\) be residual-food
+For food-ready bakery pickup $b$, let $C_b^U$ be its fixed waste-pathway
+CO₂e if uncollected. For candidate route $r$, let $C_r^W$ be residual-food
 waste-pathway CO₂e after bakery usability and pantry distribution, and let
-\(C_r^T\) be transport CO₂e. Within the maximum service count, the second stage
+$C_r^T$ be transport CO₂e. Within the maximum service count, the second stage
 minimizes
 
-\[
+$$
 \sum_{b \in B} C_b^U
 + \sum_{r \in R}
   \left(C_r^W + C_r^T - C_{b(r)}^U\right)x_r.
-\]
+$$
 
 The all-uncollected term is constant inside a decision epoch, so the
 implementation equivalently maximizes
 
-\[
+$$
 \sum_{r \in R}
   \left(C_{b(r)}^U - C_r^W - C_r^T\right)x_r.
-\]
+$$
 
 The model uses the same request, physical-driver, and food-ready-pickup
 exclusivity constraints as the Nair comparator. The shared candidate generator
@@ -217,48 +217,48 @@ unhappy-driver penalty would therefore introduce unsupported data. The public
 comparator uses the paper's SLSF-noZ variant, which preserves its central
 stochastic-menu and recourse strategy without inventing that penalty.
 
-Let \(R\) be the shared set of feasible driver–bakery–pantry route candidates,
-\(S\) a set of 100 deterministically seeded SAA willingness scenarios, and
-\(p_r\) the existing sigmoid willingness estimate for candidate \(r\). For
-scenario \(s\), \(\hat y_{rs}\) is a seeded Bernoulli draw with parameter
-\(p_r\). The decision variables are:
+Let $R$ be the shared set of feasible driver–bakery–pantry route candidates,
+$S$ a set of 100 deterministically seeded SAA willingness scenarios, and
+$p_r$ the existing sigmoid willingness estimate for candidate $r$. For
+scenario $s$, $\hat y_{rs}$ is a seeded Bernoulli draw with parameter
+$p_r$. The decision variables are:
 
-- \(x_r=1\) when route \(r\) appears in its driver's menu; and
-- \(v_{rs}=1\) when route \(r\) is assigned in scenario \(s\).
+- $x_r=1$ when route $r$ appears in its driver's menu; and
+- $v_{rs}=1$ when route $r$ is assigned in scenario $s$.
 
 The first objective maximizes expected completed pickups:
 
-\[
+$$
 \max \frac{1}{|S|}\sum_{s\in S}\sum_{r\in R}v_{rs}.
-\]
+$$
 
 Expected route distance is minimized only as a lexicographic tie-break among
 solutions with the same expected service:
 
-\[
+$$
 \min \frac{1}{|S|}\sum_{s\in S}\sum_{r\in R}m_rv_{rs}.
-\]
+$$
 
 The adapted constraints include:
 
-\[
+$$
 \sum_{r\in R(d)}x_r\le 5 \quad \forall d,
-\]
+$$
 
-\[
+$$
 v_{rs}\le x_r,\qquad v_{rs}\le \hat y_{rs}
 \quad \forall r,s,
-\]
+$$
 
-\[
+$$
 \sum_{r\in R(d)}v_{rs}\le1 \quad \forall d,s,
-\]
+$$
 
 and
 
-\[
+$$
 \sum_{r\in R(b)}v_{rs}\le1 \quad \forall b,s.
-\]
+$$
 
 A driver's menu cannot contain two pantry destinations for the same physical
 bakery pickup. The same bakery may appear in different drivers' menus, as in
@@ -270,7 +270,7 @@ candidate regardless of policy. The Horner comparator exposes its optimized
 menu, records willingness for menu options, and makes a maximum-service,
 minimum-distance final assignment among willing options. This is a direct
 recourse assignment, not a rank-one driver choice. Public deterministic replay
-disables Bernoulli removal for every model but retains \(p_r\) in the Horner
+disables Bernoulli removal for every model but retains $p_r$ in the Horner
 training scenarios and reports expected/likely acceptance diagnostics.
 
 The comparator uses the sigmoid's existing drive, requested-time, and spatial
@@ -282,15 +282,15 @@ size-limited Gurobi license cannot hold the 100-scenario model.
 
 ## Shared evaluation
 
-For every completed route from bakery \(b\) to pantry \(p\) on day \(d\), food
+For every completed route from bakery $b$ to pantry $p$ on day $d$, food
 recovered is
 
-\[
+$$
 H_{bpd}=Q_{bd}U_{bd}D_p.
-\]
+$$
 
 Food wasted is the sum of all uncollected bakery food and the collected route
-remainder \(Q_{bd}-H_{bpd}\). Environmental reporting applies the same fixed
+remainder $Q_{bd}-H_{bpd}$. Environmental reporting applies the same fixed
 landfill/pig-farm/compost and tonne-kilometre coefficients to all four models and
 reports transportation CO₂e, net waste-pathway CO₂e, their total direct CO₂e,
 and net environmental benefit.

@@ -141,7 +141,7 @@ routing-capacity sensitivity analysis.
 
 An opportunity is one open pantry receiving-window occurrence. For each pantry,
 the simulator stores whether at least one assignment was made during each of the
-last \(N\) opportunities. This means a pantry open once per month is evaluated
+last $N$ opportunities. This means a pantry open once per month is evaluated
 against its recent actual opportunities, not against an arbitrary seven-day
 calendar window.
 
@@ -162,7 +162,7 @@ The comparison report includes:
 - distribution fairness as a pantry-service Gini coefficient and service gap;
 - mean drive time, distance, preferred-destination deviation, and
   total trip duration;
-- ultimately saved food \(Q\times U\times D\), bakery food not picked up, and
+- ultimately saved food $Q\times U\times D$, bakery food not picked up, and
   collected food not ultimately distributed, plus total food wasted as the sum
   of those last two waste sources;
 - transport kg CO₂e, net waste-pathway kg CO₂e for landfill/pig-farm/compost,
