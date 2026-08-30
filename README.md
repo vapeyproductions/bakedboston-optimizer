@@ -100,9 +100,9 @@ the volunteer when to leave. Waiting safely before that departure is not a
 route-quality penalty. Instead,
 
 ```math
-\operatorname{outsideWindowRatio}_r=
-\frac{\max(0,\operatorname{requestedStart}_r-\operatorname{departure}_r)+\max(0,\operatorname{finish}_r-\operatorname{requestedFinish}_r)}
-{\operatorname{requestedFinish}_r-\operatorname{requestedStart}_r}
+\mathrm{outsideWindowRatio}_r=
+\frac{\max(0,\mathrm{requestedStart}_r-\mathrm{departure}_r)+\max(0,\mathrm{finish}_r-\mathrm{requestedFinish}_r)}
+{\mathrm{requestedFinish}_r-\mathrm{requestedStart}_r}
 ```
 
 Only route time before or after the driver's requested interval is penalized.
@@ -117,11 +117,11 @@ misses for route $r=(d,b,p)$ are the shortest straight-line distances from
 the bakery and pantry to the corresponding requested areas:
 
 ```math
-\delta^{\mathrm{start}}_r=\max\!\left\{0,\operatorname{dist}(b,\operatorname{startZIP}_d)-\operatorname{radius}^{\mathrm{start}}_d\right\}
+\delta^{\mathrm{start}}_r=\max\!\left\{0,\mathrm{dist}(b,\mathrm{startZIP}_d)-\mathrm{radius}^{\mathrm{start}}_d\right\}
 ```
 
 ```math
-\delta^{\mathrm{end}}_r=\max\!\left\{0,\operatorname{dist}(p,\operatorname{endZIP}_d)-\operatorname{radius}^{\mathrm{end}}_d\right\}
+\delta^{\mathrm{end}}_r=\max\!\left\{0,\mathrm{dist}(p,\mathrm{endZIP}_d)-\mathrm{radius}^{\mathrm{end}}_d\right\}
 ```
 
 A facility inside its requested area has deviation zero. It receives no bonus;
@@ -130,7 +130,7 @@ are scaled against the largest corresponding deviation among that driver's
 feasible alternatives:
 
 ```math
-\operatorname{spatialDeviationRatio}_r=\frac{1}{K}
+\mathrm{spatialDeviationRatio}_r=\frac{1}{K}
 \left(
 \frac{\delta^{\mathrm{start}}_r}{\max_{j\in R_d}\delta^{\mathrm{start}}_j}
 +
@@ -157,7 +157,7 @@ food—not an arbitrary seven-day period. If $served_p$ of $n_p$ recent open
 windows received at least one assignment:
 
 ```math
-\operatorname{priority}_p=1-\frac{\operatorname{served}_p+1}{n_p+2}
+\mathrm{priority}_p=1-\frac{\mathrm{served}_p+1}{n_p+2}
 ```
 
 Laplace smoothing gives a new pantry a neutral priority of 0.5. Missed

@@ -67,7 +67,7 @@ assignment enters $A$ only if:
 The fairness metric uses the last $N$ open receiving opportunities. Let $n_p$ be the number of recent opportunities and $served_p$ the number that received at least one simulated assignment:
 
 ```math
-\operatorname{priority}_p=1-\frac{\operatorname{served}_p+1}{n_p+2}
+\mathrm{priority}_p=1-\frac{\mathrm{served}_p+1}{n_p+2}
 ```
 
 Laplace smoothing gives a pantry with no recorded opportunities a neutral priority of 0.5. Missed opportunities raise priority, while recent service lowers it. A pantry always remains feasible, so a nearby lower-priority pantry can still be selected rather than discarding a viable pickup.
@@ -111,7 +111,7 @@ the completed-route waste result is $W_{bpd}e_b$.
 Transportation uses 0.41947 kg CO₂e/tonne-km:
 
 ```math
-T_r=0.41947\left(\frac{Q_{bd}}{1000}\right)\left(1.60934\,\operatorname{miles}_r\right).
+T_r=0.41947\left(\frac{Q_{bd}}{1000}\right)\left(1.60934\,\mathrm{miles}_r\right).
 ```
 
 The environmental coefficient is $E_r=(Q_{bd}-W_{bpd})e_b-T_r$. The primary
@@ -126,12 +126,12 @@ spatial burdens, with each burden clipped to $[0,1]$.
 More precisely:
 
 ```math
-\operatorname{outsideMinutes}_r=\max(0,\operatorname{requestedStart}_r-\operatorname{departure}_r)
-+\max(0,\operatorname{finish}_r-\operatorname{requestedFinish}_r)
+\mathrm{outsideMinutes}_r=\max(0,\mathrm{requestedStart}_r-\mathrm{departure}_r)
++\max(0,\mathrm{finish}_r-\mathrm{requestedFinish}_r)
 ```
 
 ```math
-\operatorname{outsideWindowRatio}_r=\frac{\operatorname{outsideMinutes}_r}{\operatorname{requestedWindowMinutes}_r}
+\mathrm{outsideWindowRatio}_r=\frac{\mathrm{outsideMinutes}_r}{\mathrm{requestedWindowMinutes}_r}
 ```
 
 The request interval must be at least 30 minutes. Waiting between login and a
@@ -145,11 +145,11 @@ For example, a 30-minute miss against a 30-minute request has ratio 1.0 and a
 For route $r=(d,b,p)$, define the raw spatial misses:
 
 ```math
-\delta^{\mathrm{start}}_r=\max\!\left\{0,\operatorname{dist}(b,\operatorname{startZIP}_d)-\operatorname{radius}^{\mathrm{start}}_d\right\}
+\delta^{\mathrm{start}}_r=\max\!\left\{0,\mathrm{dist}(b,\mathrm{startZIP}_d)-\mathrm{radius}^{\mathrm{start}}_d\right\}
 ```
 
 ```math
-\delta^{\mathrm{end}}_r=\max\!\left\{0,\operatorname{dist}(p,\operatorname{endZIP}_d)-\operatorname{radius}^{\mathrm{end}}_d\right\}
+\delta^{\mathrm{end}}_r=\max\!\left\{0,\mathrm{dist}(p,\mathrm{endZIP}_d)-\mathrm{radius}^{\mathrm{end}}_d\right\}
 ```
 
 The distance is measured to the closest edge of the estimated ZIP circle, so a
@@ -249,19 +249,19 @@ paper's full algorithm.
 Each driver request receives at most one assignment:
 
 ```math
-\sum_{a\in A:\,\operatorname{driverRequest}(a)=d}x_a\leq1\qquad\forall d\in D
+\sum_{a\in A:\,\mathrm{driverRequest}(a)=d}x_a\leq1\qquad\forall d\in D
 ```
 
 Each physical driver receives at most one simultaneous assignment, even if multiple active requests exist:
 
 ```math
-\sum_{a\in A:\,\operatorname{driver}(a)=v}x_a\leq1\qquad\forall v
+\sum_{a\in A:\,\mathrm{driver}(a)=v}x_a\leq1\qquad\forall v
 ```
 
 Each bakery pickup can be assigned only once:
 
 ```math
-\sum_{a\in A:\,\operatorname{pickup}(a)=b}x_a\leq1\qquad\forall b\in B
+\sum_{a\in A:\,\mathrm{pickup}(a)=b}x_a\leq1\qquad\forall b\in B
 ```
 
 There is intentionally no one-delivery capacity constraint on pantries. A pantry may receive multiple orders while its window is open.
