@@ -17,9 +17,9 @@ No shortcut policy is used to decide which candidates the MIP is allowed to see.
 The MIP does not equate a login with a departure. Before optimization, the
 candidate generator creates a timed route column
 
-$$
-a=(d,b,p,t^{depart},t^{pickup},t^{arrival},t^{finish})
-$$
+```math
+a=(d,b,p,t^{\mathrm{depart}},t^{\mathrm{pickup}},t^{\mathrm{arrival}},t^{\mathrm{finish}})
+```
 
 for each useful driver–bakery–pantry schedule. A column therefore contains the
 complete plan: when the driver should leave, when pickup occurs, when pantry
@@ -66,9 +66,9 @@ assignment enters $A$ only if:
 
 The fairness metric uses the last $N$ open receiving opportunities. Let $n_p$ be the number of recent opportunities and $served_p$ the number that received at least one simulated assignment:
 
-$$
-priority_p = 1 - \frac{served_p + 1}{n_p + 2}
-$$
+```math
+\operatorname{priority}_p=1-\frac{\operatorname{served}_p+1}{n_p+2}
+```
 
 Laplace smoothing gives a pantry with no recorded opportunities a neutral priority of 0.5. Missed opportunities raise priority, while recent service lowers it. A pantry always remains feasible, so a nearby lower-priority pantry can still be selected rather than discarding a viable pickup.
 
@@ -91,16 +91,16 @@ runs; the seed and occurrence ID determine the reproducible daily draws. Each
 pantry $p$ has a fixed distribution fraction $D_p$. A selected route's
 ultimately saved food is
 
-$$
+```math
 H_{bpd}=Q_{bd}U_{bd}D_p.
-$$
+```
 
 If a food-available bakery occurrence is not picked up, all $Q_{bd}$ is
 recorded as uncollected bakery food. If it is picked up, the model records
 
-$$
+```math
 W_{bpd}=Q_{bd}-H_{bpd}
-$$
+```
 
 as collected food that is not ultimately distributed. Each bakery has fixed
 landfill, pig-farm, and compost shares $(L_b,P_b,C_b)$, which sum to one. With
@@ -110,9 +110,9 @@ the completed-route waste result is $W_{bpd}e_b$.
 
 Transportation uses 0.41947 kg CO₂e/tonne-km:
 
-$$
-T_r=0.41947\left(\frac{Q_{bd}}{1000}\right)(1.60934\,miles_r).
-$$
+```math
+T_r=0.41947\left(\frac{Q_{bd}}{1000}\right)\left(1.60934\,\operatorname{miles}_r\right).
+```
 
 The environmental coefficient is $E_r=(Q_{bd}-W_{bpd})e_b-T_r$. The primary
 score conservatively sets avoided-production substitution to zero; the declared
@@ -125,14 +125,14 @@ spatial burdens, with each burden clipped to $[0,1]$.
 
 More precisely:
 
-$$
-outsideMinutes = \max(0, requestedStart-departure)
-+ \max(0, finish-requestedFinish)
-$$
+```math
+\operatorname{outsideMinutes}_r=\max(0,\operatorname{requestedStart}_r-\operatorname{departure}_r)
++\max(0,\operatorname{finish}_r-\operatorname{requestedFinish}_r)
+```
 
-$$
-outsideWindowRatio = \frac{outsideMinutes}{requestedWindowMinutes}
-$$
+```math
+\operatorname{outsideWindowRatio}_r=\frac{\operatorname{outsideMinutes}_r}{\operatorname{requestedWindowMinutes}_r}
+```
 
 The request interval must be at least 30 minutes. Waiting between login and a
 planned later departure is displayed to the driver but does not reduce route
@@ -144,13 +144,13 @@ For example, a 30-minute miss against a 30-minute request has ratio 1.0 and a
 
 For route $r=(d,b,p)$, define the raw spatial misses:
 
-$$
-\delta^{start}_r = \max\{0,\ distance(b,startZIP_d)-radius^{start}_d\}
-$$
+```math
+\delta^{\mathrm{start}}_r=\max\!\left\{0,\operatorname{dist}(b,\operatorname{startZIP}_d)-\operatorname{radius}^{\mathrm{start}}_d\right\}
+```
 
-$$
-\delta^{end}_r = \max\{0,\ distance(p,endZIP_d)-radius^{end}_d\}
-$$
+```math
+\delta^{\mathrm{end}}_r=\max\!\left\{0,\operatorname{dist}(p,\operatorname{endZIP}_d)-\operatorname{radius}^{\mathrm{end}}_d\right\}
+```
 
 The distance is measured to the closest edge of the estimated ZIP circle, so a
 facility inside the area has a zero-mile miss. For each driver request, each
@@ -167,25 +167,18 @@ penalty in the network objective.
 ## Participation estimate
 
 Technical feasibility does not guarantee that a volunteer would accept a
-route. Each feasible route therefore receives an estimated acceptance
-probability:
+route. Let $m_r$ be route drive minutes, $w_r$ the proportional miss of the
+requested time window, and $s_r$ the normalized miss of the requested start
+and destination areas. Each feasible route receives the following estimated
+acceptance probability:
 
-$$
-a_r = \sigma(\theta_0
-- \theta_t driveMinutes_r
-- \theta_w outsideWindowRatio_r
-- \theta_s spatialDeviationRatio_r)
-$$
-
-with the current academic scenario parameters
-
-$$
-(\theta_0,\theta_t,\theta_w,\theta_s)=(2.2,0.045,1.8,1.1).
-$$
+```math
+a_r=\min\!\left\{0.98,\max\!\left\{0.02,\frac{1}{1+\exp\!\left[-\left(2.2-0.045m_r-1.8w_r-1.1s_r\right)\right]}\right\}\right\}.
+```
 
 The estimate falls when a route requires more driving or fits the volunteer's
-requested time and geography less closely. The estimate is clipped to
-$[0.02,0.98]$ for stable scenario analysis. It is intentionally simple,
+requested time and geography less closely. The explicit min/max terms clip the
+estimate to $[0.02,0.98]$ for stable scenario analysis. It is intentionally simple,
 inspectable, and replaceable. These coefficients are synthetic assumptions,
 not learned from volunteer behavior and not validated probabilities.
 
@@ -194,9 +187,9 @@ not learned from volunteer behavior and not validated probabilities.
 The Gurobi model uses two ordered objectives. First, maximize the expected
 number of completed pickups:
 
-$$
+```math
 Z_1 = \max \sum_{a \in A} a_a x_a
-$$
+```
 
 where $a_a$ is the estimated acceptance probability of timed route column
 $a$. A technically feasible assignment with low predicted acceptance can
@@ -206,9 +199,9 @@ completion.
 Second, among solutions retaining at least 99% of the optimal first-stage
 value, maximize a normalized 100-point score:
 
-$$
+```math
 Z_2=10C+10V_Q+10F_Q+10V_H+10F_H+10P+20E+20D.
-$$
+```
 
 Every component lies in $[0,1]$: pantry coverage $C$, selected raw-food
 volume $V_Q$, cumulative raw-food evenness $F_Q$, ultimately saved-food
@@ -255,21 +248,21 @@ paper's full algorithm.
 
 Each driver request receives at most one assignment:
 
-$$
-\sum_{a \in A:\,driverRequest(a)=d} x_a \leq 1 \qquad \forall d \in D
-$$
+```math
+\sum_{a\in A:\,\operatorname{driverRequest}(a)=d}x_a\leq1\qquad\forall d\in D
+```
 
 Each physical driver receives at most one simultaneous assignment, even if multiple active requests exist:
 
-$$
-\sum_{a \in A:\,driver(a)=v} x_a \leq 1 \qquad \forall v
-$$
+```math
+\sum_{a\in A:\,\operatorname{driver}(a)=v}x_a\leq1\qquad\forall v
+```
 
 Each bakery pickup can be assigned only once:
 
-$$
-\sum_{a \in A:\,pickup(a)=b} x_a \leq 1 \qquad \forall b \in B
-$$
+```math
+\sum_{a\in A:\,\operatorname{pickup}(a)=b}x_a\leq1\qquad\forall b\in B
+```
 
 There is intentionally no one-delivery capacity constraint on pantries. A pantry may receive multiple orders while its window is open.
 

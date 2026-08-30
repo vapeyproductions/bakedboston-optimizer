@@ -39,9 +39,9 @@ column records a driver request, bakery occurrence, pantry window, optimized
 departure, pickup, pantry arrival, and finish time. Login is the decision time,
 not the departure time. For each feasible timed column $a$:
 
-$$
+```math
 x_a \in \{0,1\}
-$$
+```
 
 Gurobi uses two hierarchical objectives:
 
@@ -49,20 +49,20 @@ Gurobi uses two hierarchical objectives:
 2. among solutions retaining at least 99% of the best first-stage value,
    maximize pantry priority and sustainable-logistics quality.
 
-For route $r$, the first-stage coefficient is an inspectable scenario
-estimate—not observed behavior or a trained ML model:
+For route $r$, let $m_r$ be drive minutes, $w_r$ the share of the requested
+time window missed, and $s_r$ the normalized start/destination-area miss. The
+first-stage coefficient is the following clipped logistic estimate—not
+observed behavior or a trained ML model:
 
-$$
-a_r = \sigma(2.2 - 0.045\,driveMinutes_r
-- 1.8\,outsideWindowRatio_r
-- 1.1\,spatialDeviationRatio_r)
-$$
+```math
+a_r=\min\!\left\{0.98,\max\!\left\{0.02,\frac{1}{1+\exp\!\left[-\left(2.2-0.045m_r-1.8w_r-1.1s_r\right)\right]}\right\}\right\}.
+```
 
 The optimizer's first stage is therefore
 
-$$
+```math
 \max \sum_{r\in R} a_r x_r.
-$$
+```
 
 This directly tests BakedBoston's thesis: a route that technically moves food
 is not useful if its burden makes a volunteer unlikely to accept it. The
@@ -71,9 +71,9 @@ empirically calibrated until real choice data exist.
 
 For bakery $b$, pantry $p$, and simulated day $d$, route food saved is:
 
-$$
+```math
 H_{bpd}=Q_{bd}U_{bd}D_p.
-$$
+```
 
 Food-available bakery occurrences with no completed pickup are recorded as
 uncollected bakery food. For a completed route, $Q-H$ is collected food not
@@ -83,9 +83,9 @@ Avoided production is held at zero in the primary score.
 
 The normalized second-stage objective is
 
-$$
+```math
 10C+10V_Q+10F_Q+10V_H+10F_H+10P+20E+20D,
-$$
+```
 
 covering pantry reach, raw and saved-food volume/evenness, opportunity priority,
 net direct CO₂ benefit, and driver fit. See [docs/model.md](docs/model.md) for
@@ -99,11 +99,11 @@ minutes to load at the bakery and 5 minutes to unload at the pantry, and shows
 the volunteer when to leave. Waiting safely before that departure is not a
 route-quality penalty. Instead,
 
-$$
-outsideWindowRatio =
-\frac{\max(0, requestedStart-departure)+\max(0, finish-requestedFinish)}
-{requestedFinish-requestedStart}
-$$
+```math
+\operatorname{outsideWindowRatio}_r=
+\frac{\max(0,\operatorname{requestedStart}_r-\operatorname{departure}_r)+\max(0,\operatorname{finish}_r-\operatorname{requestedFinish}_r)}
+{\operatorname{requestedFinish}_r-\operatorname{requestedStart}_r}
+```
 
 Only route time before or after the driver's requested interval is penalized.
 Dividing by the requested interval makes the same miss matter more for a tight
@@ -116,27 +116,27 @@ represented by a small estimated circular area around its center. The raw
 misses for route $r=(d,b,p)$ are the shortest straight-line distances from
 the bakery and pantry to the corresponding requested areas:
 
-$$
-\delta^{start}_r = \max\{0,\ distance(b,startZIP_d)-radius^{start}_d\}
-$$
+```math
+\delta^{\mathrm{start}}_r=\max\!\left\{0,\operatorname{dist}(b,\operatorname{startZIP}_d)-\operatorname{radius}^{\mathrm{start}}_d\right\}
+```
 
-$$
-\delta^{end}_r = \max\{0,\ distance(p,endZIP_d)-radius^{end}_d\}
-$$
+```math
+\delta^{\mathrm{end}}_r=\max\!\left\{0,\operatorname{dist}(p,\operatorname{endZIP}_d)-\operatorname{radius}^{\mathrm{end}}_d\right\}
+```
 
 A facility inside its requested area has deviation zero. It receives no bonus;
 routes farther away only receive a penalty. For each driver, the two deviations
 are scaled against the largest corresponding deviation among that driver's
 feasible alternatives:
 
-$$
-spatialDeviationRatio_r = \frac{1}{K}
+```math
+\operatorname{spatialDeviationRatio}_r=\frac{1}{K}
 \left(
-\frac{\delta^{start}_r}{\max_{j\in R_d}\delta^{start}_j}
+\frac{\delta^{\mathrm{start}}_r}{\max_{j\in R_d}\delta^{\mathrm{start}}_j}
 +
-\frac{\delta^{end}_r}{\max_{j\in R_d}\delta^{end}_j}
+\frac{\delta^{\mathrm{end}}_r}{\max_{j\in R_d}\delta^{\mathrm{end}}_j}
 \right)
-$$
+```
 
 where $K$ is the number of supplied spatial preferences (one or two) and a
 component whose maximum is zero contributes zero. Thus the route with the
@@ -156,9 +156,9 @@ Priority is based on the pantry's last $N$ simulated opportunities to receive
 food—not an arbitrary seven-day period. If $served_p$ of $n_p$ recent open
 windows received at least one assignment:
 
-$$
-priority_p = 1 - \frac{served_p + 1}{n_p + 2}
-$$
+```math
+\operatorname{priority}_p=1-\frac{\operatorname{served}_p+1}{n_p+2}
+```
 
 Laplace smoothing gives a new pantry a neutral priority of 0.5. Missed
 opportunities raise priority; recent service lowers it. A pantry is never

@@ -53,15 +53,15 @@ named organization.
 
 For bakery $b$, the pathway coefficient is
 
-$$
-e_b=L_b(0.36)+P_b(-0.12)+C_b(0.00581).
-$$
+```math
+e_b=0.36L_b-0.12P_b+0.00581C_b.
+```
 
 For a completed bakery–pantry route, the ultimate saved food is
 
-$$
+```math
 H_{bpd}=Q_{bd}U_{bd}D_p,
-$$
+```
 
 the collected food not ultimately distributed is $W_{bpd}=Q_{bd}-H_{bpd}$,
 and the primary direct environmental benefit is the difference between the
