@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import asdict
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -172,6 +173,124 @@ PUBLIC_COMPARISON_POLICIES: tuple[RoutingPolicy, ...] = (
 )
 
 
+TOTAL_IMPACT_PILLARS = {
+    "service": (
+        "Completed service",
+        "Completed bakery-to-pantry deliveries in the realized routing-capacity replay.",
+    ),
+    "food": (
+        "Food recovery",
+        "Ultimately distributed food using Q × bakery usability × pantry distribution.",
+    ),
+    "environment": (
+        "Environmental benefit",
+        "Net direct waste-pathway benefit after subtracting transportation CO2e.",
+    ),
+    "equity": (
+        "Distribution equity",
+        "Equal average of pantry coverage, raw-donation equality, and saved-food equality.",
+    ),
+    "volunteer": (
+        "Volunteer fit",
+        "Mean modeled route-acceptance probability, which combines driving and requested time/location fit.",
+    ),
+    "efficiency": (
+        "Route efficiency",
+        "Average route-distance efficiency relative to the shortest-distance policy in the same scenario.",
+    ),
+}
+
+
+def _finite_metric(result: dict[str, Any], key: str) -> float:
+    value = result.get("metrics", {}).get(key)
+    if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        return 0.0
+    return float(value)
+
+
+def _higher_is_better_ratio(value: float, best: float) -> float:
+    """Return a bounded fraction of the best observed value using a natural zero."""
+
+    if best > 0:
+        return max(0.0, min(1.0, value / best))
+    if best == 0:
+        return 1.0 if value == 0 else 0.0
+    if value < 0:
+        return max(0.0, min(1.0, best / value))
+    return 1.0
+
+
+def _lower_is_better_ratio(value: float, best: float) -> float:
+    """Return a bounded efficiency fraction for nonnegative burden measures."""
+
+    if value <= 0:
+        return 1.0 if best <= 0 else 0.0
+    return max(0.0, min(1.0, best / value))
+
+
+def _add_total_impact_scores(payload: dict[str, Any]) -> None:
+    """Attach a transparent post-hoc six-pillar comparison score.
+
+    This score is deliberately separate from every policy's optimization
+    objective. It summarizes non-duplicated outcome families relative to the
+    best policy in this exact scenario and must not be interpreted as an
+    externally calibrated social-impact measure.
+    """
+
+    results = payload.get("results", [])
+    if not results:
+        return
+
+    rows: list[dict[str, float]] = []
+    for result in results:
+        completed = _finite_metric(result, "completedDeliveries")
+        acceptance = _finite_metric(result, "expectedDriverAcceptanceRate")
+        rows.append({
+            "service": completed,
+            "food": _finite_metric(result, "foodSavedKg"),
+            "environment": _finite_metric(result, "netEnvironmentalBenefitKgCO2e"),
+            "coverage": _finite_metric(result, "pantryCoveragePercentage"),
+            "rawEquality": max(0.0, 1.0 - _finite_metric(result, "rawDonationDistributionGini")),
+            "savedEquality": max(0.0, 1.0 - _finite_metric(result, "foodSavedDistributionGini")),
+            "volunteer": acceptance,
+            "distance": _finite_metric(result, "averageDistanceMiles"),
+        })
+
+    positive_distances = [row["distance"] for row in rows if row["distance"] > 0]
+    best = {
+        "service": max(row["service"] for row in rows),
+        "food": max(row["food"] for row in rows),
+        "environment": max(row["environment"] for row in rows),
+        "coverage": max(row["coverage"] for row in rows),
+        "rawEquality": max(row["rawEquality"] for row in rows),
+        "savedEquality": max(row["savedEquality"] for row in rows),
+        "volunteer": max(row["volunteer"] for row in rows),
+        "distance": min(positive_distances) if positive_distances else 0.0,
+    }
+
+    for result, row in zip(results, rows, strict=True):
+        equity = sum((
+            _higher_is_better_ratio(row["coverage"], best["coverage"]),
+            _higher_is_better_ratio(row["rawEquality"], best["rawEquality"]),
+            _higher_is_better_ratio(row["savedEquality"], best["savedEquality"]),
+        )) / 3.0
+        pillars = {
+            "service": _higher_is_better_ratio(row["service"], best["service"]),
+            "food": _higher_is_better_ratio(row["food"], best["food"]),
+            "environment": _higher_is_better_ratio(row["environment"], best["environment"]),
+            "equity": equity,
+            "volunteer": _higher_is_better_ratio(row["volunteer"], best["volunteer"]),
+            "efficiency": _lower_is_better_ratio(row["distance"], best["distance"]),
+        }
+        metrics = result["metrics"]
+        for key, value in pillars.items():
+            metrics[f"impact{key.title()}Score"] = round(100.0 * value, 1)
+        metrics["totalImpactScore"] = round(
+            100.0 * sum(pillars.values()) / len(pillars),
+            1,
+        )
+
+
 def _network_payload(snapshot: NetworkSnapshot) -> dict[str, Any]:
     def organization(item: Any, kind: str) -> dict[str, Any]:
         location = item.location()
@@ -271,7 +390,7 @@ def build_web_payload(
     *,
     start_date: date,
     days: int = 5,
-    seed: int = 2026,
+    seed: int = 2033,
     drivers_per_day: int = 12,
     matching_interval_minutes: int = 60,
     max_simultaneous_drivers: int = 3,
@@ -303,8 +422,9 @@ def build_web_payload(
         "bakeryCount": len(snapshot.eligible_bakeries),
         "pantryCount": len(snapshot.eligible_pantries),
     })
+    _add_total_impact_scores(payload)
     payload.update({
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "displayMode": "interactive_replay_of_precomputed_gurobi_experiment",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "sourceSnapshotGeneratedAt": snapshot.generated_at.isoformat(),
@@ -375,6 +495,24 @@ def build_web_payload(
                 "the same food, environmental, travel, and acceptance ledger."
             ),
         },
+        "totalImpactMethodology": {
+            "label": "Balanced Total Impact",
+            "description": (
+                "A post-hoc communication index that gives equal weight to six non-duplicated "
+                "outcome pillars. Each pillar is scored from 0 to 100 relative to the best "
+                "policy in this exact scenario."
+            ),
+            "weightPerPillar": round(100 / len(TOTAL_IMPACT_PILLARS), 4),
+            "pillars": {
+                key: {"label": label, "description": description}
+                for key, (label, description) in TOTAL_IMPACT_PILLARS.items()
+            },
+            "caveat": (
+                "This scenario-relative index is not used by any optimizer, is not an externally "
+                "validated social-impact measure, and can change when the scenario or comparison "
+                "set changes. The underlying physical and fairness metrics remain the auditable result."
+            ),
+        },
     })
     return payload
 
@@ -387,7 +525,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--start-date", type=date.fromisoformat, default=date(2026, 8, 24))
     parser.add_argument("--days", type=int, default=5)
-    parser.add_argument("--seed", type=int, default=2026)
+    parser.add_argument("--seed", type=int, default=2033)
     parser.add_argument("--drivers-per-day", type=int, default=12)
     parser.add_argument("--matching-interval-minutes", type=int, default=60)
     parser.add_argument("--max-simultaneous-drivers", type=int, choices=(2, 3), default=3)

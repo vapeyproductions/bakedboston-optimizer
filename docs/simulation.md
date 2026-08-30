@@ -172,6 +172,23 @@ The comparison report includes:
 - feasible candidates examined and the declared system-objective value; and
 - Gurobi runtime, solve status, and MIP gap.
 
+The public replay also reports a **Balanced Total Impact** communication index.
+It is computed after every policy has run and does not enter any policy's
+optimization. Six non-duplicated pillars receive equal weight: completed
+service, ultimately saved food, net direct environmental benefit,
+distribution equity, modeled volunteer fit, and route-distance efficiency.
+Each pillar is expressed from 0 to 100 relative to the best policy in that same
+scenario. Distribution equity is the mean of relative pantry coverage,
+raw-donation equality, and saved-food equality. The total is the arithmetic
+mean of the six pillar scores.
+
+Because the index is relative to the selected scenario and comparison set, it
+is not an externally calibrated social-impact measure and must not replace the
+underlying physical, behavioral, and fairness metrics. The bundled public
+walkthrough uses seed `2033` as an illustrative balanced-tradeoff scenario in
+which every public policy completes the same number of deliveries. Multi-seed
+results remain the appropriate evidence for general performance.
+
 The standard experiment evaluates a five-day horizon, optionally over multiple
 random seeds, and reports the mean of every metric for each policy.
 Passing `--summary-csv` also writes one flat row per horizon and policy for

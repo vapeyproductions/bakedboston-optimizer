@@ -297,7 +297,7 @@ python3 -m bakedboston_optimizer.web_export \
   data/academic_comparison_snapshot.json \
   --start-date 2026-08-24 \
   --days 5 \
-  --seed 2026 \
+  --seed 2033 \
   --drivers-per-day 12 \
   --max-simultaneous-drivers 3 \
   --output simulation-data.json
@@ -366,6 +366,11 @@ Each report includes:
 - **food and environmental performance:** ultimately saved food, bakery food
   not picked up, collected food not ultimately distributed, and one net direct
   kg CO₂e benefit;
+- **Balanced Total Impact:** a post-hoc, scenario-relative six-pillar index
+  giving equal weight to completed service, food recovery, net environmental
+  benefit, distribution equity, volunteer fit, and route efficiency; this is a
+  communication aid rather than an optimizer objective or externally validated
+  social-impact measure;
 - **objective evidence:** total declared system-objective value and feasible
   candidate count; and
 - a timestamped event log containing every route recommended to each driver and

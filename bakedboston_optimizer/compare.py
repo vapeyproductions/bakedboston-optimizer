@@ -43,8 +43,8 @@ def _policies(value: str) -> tuple[RoutingPolicy, ...]:
 def _print_summary(report: Any) -> None:
     columns = (
         ("done", "completedDeliveries"),
-        ("coverage", "pickupCoverage"),
-        ("pantries", "uniquePantriesServed"),
+        ("coverage", "bakeryPickupCoverage"),
+        ("pantries", "pantryCoverageCount"),
         ("gini", "pantryServiceGini"),
         ("drive", "averageDriveMinutes"),
         ("quality", "totalRouteQuality"),

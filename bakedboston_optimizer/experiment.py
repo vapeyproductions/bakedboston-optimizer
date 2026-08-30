@@ -2023,6 +2023,7 @@ def _aggregate_metrics(values: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "totalSolverRuntimeSeconds",
         "averageSolverRuntimeSeconds",
         "totalRouteQuality",
+        "averageRouteQuality",
     )
     aggregated = {
         key: round(sum(float(item[key]) for item in values) / len(values), 4)

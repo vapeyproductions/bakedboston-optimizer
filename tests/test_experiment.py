@@ -224,6 +224,16 @@ class ExperimentTests(unittest.TestCase):
             payload["policyMetadata"]["horner_2021_slsf_noz"]["selectionMode"],
             "direct_assignment",
         )
+        self.assertEqual(payload["schemaVersion"], 3)
+        self.assertEqual(
+            set(payload["totalImpactMethodology"]["pillars"]),
+            {"service", "food", "environment", "equity", "volunteer", "efficiency"},
+        )
+        for result in payload["results"]:
+            metrics = result["metrics"]
+            self.assertTrue(0 <= metrics["totalImpactScore"] <= 100)
+            for pillar in ("Service", "Food", "Environment", "Equity", "Volunteer", "Efficiency"):
+                self.assertTrue(0 <= metrics[f"impact{pillar}Score"] <= 100)
         horner = next(
             item
             for item in payload["results"]
