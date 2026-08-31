@@ -434,6 +434,15 @@ class ExperimentTests(unittest.TestCase):
                     self.assertIn("driverStart", route)
                     self.assertIn("bakeryLocation", route)
                     self.assertIn("pantryLocation", route)
+                    self.assertIn("bakeryUnusableFoodKg", route)
+                    self.assertIn("pantryUndistributedFoodKg", route)
+                    self.assertIn("bakeryRouteWasteKgCO2e", route)
+                    self.assertIn("pantryRouteWasteKgCO2e", route)
+                    self.assertAlmostEqual(
+                        route["pantryLandfillFraction"]
+                        + route["pantryPigFarmFraction"],
+                        1.0,
+                    )
             self.assertTrue(
                 all(len(owners) == 1 for owners in pickup_owners.values())
             )

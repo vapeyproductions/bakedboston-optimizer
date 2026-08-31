@@ -97,7 +97,7 @@ POLICY_METADATA = {
             "bakery and pantry availability windows",
             "daily bakery food and usability",
             "pantry distribution fraction",
-            "bakery waste allocation",
+            "bakery and pantry waste allocations",
             "route distance and fixed direct-emissions coefficients",
         ],
         "inputsExcluded": [
@@ -311,7 +311,10 @@ def _network_payload(snapshot: NetworkSnapshot) -> dict[str, Any]:
                 "wasteAllocation": asdict(item.waste_allocation) if item.waste_allocation is not None else None,
             })
         else:
-            payload["distributionFraction"] = item.pantry_distribution_fraction
+            payload.update({
+                "distributionFraction": item.pantry_distribution_fraction,
+                "wasteAllocation": asdict(item.waste_allocation) if item.waste_allocation is not None else None,
+            })
         return payload
 
     return {
@@ -453,9 +456,11 @@ def build_web_payload(
             "productionSubstitutionFraction": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.production_substitution_fraction,
             "interpretation": (
                 "Declared academic scenario coefficients. The primary objective credits the "
-                "difference between the bakery's no-pickup waste outcome and the waste remaining "
-                "after Q × usability × pantry distribution, then subtracts tonne-kilometre "
-                "transport emissions. Avoided production is held at zero in the primary score."
+                "difference between the bakery's no-pickup waste outcome and two route-waste "
+                "streams: bakery-unusable food under the bakery mix and pantry-undistributed "
+                "food under that pantry's landfill/pig-farm mix. It then subtracts usable-cargo "
+                "tonne-kilometre transport emissions. Avoided production is held at zero in the "
+                "primary score."
             ),
         },
         "network": _network_payload(snapshot),

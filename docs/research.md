@@ -145,11 +145,15 @@ results.
   while the strongest configurations combined higher-quality food, sorting,
   and shorter direct transport.
 
-  BakedBoston adapts that structure using fixed bakery waste mixes, pantry
-  distribution fractions, and $H=Q\times U\times D$. The public simulator
-  reports food saved, bakery food not picked up, collected food not ultimately
-  distributed, and one net direct CO₂e result. These are declared scenario
-  coefficients, not a verified carbon inventory.
+  BakedBoston adapts that structure using fixed bakery waste mixes, unique
+  pantry landfill/pig-farm mixes, pantry distribution fractions, and
+  $H=Q\times U\times D$. The paper's redistribution-stage baseline is 40%
+  landfill / 60% pig farm, with 20%–60% landfill tested in sensitivity analysis;
+  BakedBoston's pantry values are fixed fictional scenarios within that range.
+  The public simulator reports food saved, bakery food not picked up,
+  bakery-unusable food, pantry-undistributed food, and one net direct CO₂e
+  result. These are declared scenario coefficients, not a verified carbon
+  inventory.
 
 ## Evidence and validation boundary
 

@@ -23,5 +23,10 @@ Gurobi policy and comparison heuristics can be evaluated on a meaningful
 multi-driver assignment problem. Its organization names and addresses are
 academic labels, not real institutions.
 
+Each pantry in the academic comparison snapshot also has a fixed, unique
+landfill/pig-farm allocation for redistribution waste. Those two shares sum to
+100% and pantry compost is 0%. They are paper-bounded scenario assumptions, not
+observations about any institution.
+
 The simulator reads this data but never registers an account, sends a message,
 reserves food, or modifies an institution's information.

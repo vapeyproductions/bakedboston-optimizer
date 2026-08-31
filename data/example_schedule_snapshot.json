@@ -29,6 +29,7 @@
       "addressValidationStatus": "validated",
       "latitude": 42.36,
       "longitude": -71.06,
+      "wasteAllocation": {"landfill": 0.40, "pigFarm": 0.60, "compost": 0.0},
       "recurringDays": "Mon,Wed,Fri",
       "openTime": "[{\"recurrence\":\"weekly\",\"day\":\"Mon\",\"time\":\"16:30\"},{\"recurrence\":\"weekly\",\"day\":\"Wed\",\"time\":\"16:30\"},{\"recurrence\":\"weekly\",\"day\":\"Fri\",\"time\":\"16:30\"}]",
       "closeTime": "[{\"time\":\"19:00\"},{\"time\":\"19:00\"},{\"time\":\"19:00\"}]",

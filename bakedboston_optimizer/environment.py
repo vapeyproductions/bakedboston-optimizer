@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .models import BakeryPickup
+from .models import BakeryPickup, WasteAllocation
 
 
 MILES_TO_KILOMETERS = 1.60934
@@ -39,7 +39,11 @@ class EnvironmentalImpact:
     pantry_distribution_fraction: float
     food_saved_kg: float
     collected_not_distributed_kg: float
+    bakery_unusable_food_kg: float
+    pantry_undistributed_food_kg: float
     counterfactual_waste_kg_co2e: float
+    bakery_route_waste_kg_co2e: float
+    pantry_route_waste_kg_co2e: float
     route_waste_kg_co2e: float
     avoided_waste_kg_co2e: float
     avoided_production_kg_co2e: float
@@ -84,31 +88,50 @@ def estimate_route_environmental_impact(
     assumptions: EnvironmentalAssumptions = DEFAULT_ENVIRONMENTAL_ASSUMPTIONS,
     *,
     pantry_distribution_fraction: float = 1.0,
+    pantry_waste_allocation: WasteAllocation = WasteAllocation(
+        landfill=0.40,
+        pig_farm=0.60,
+        compost=0.0,
+    ),
 ) -> EnvironmentalImpact:
     """Estimate food saved and net direct environmental benefit for one route.
 
     ``food saved = bakery food × bakery usability × pantry distribution``.
-    Without a completed route, all bakery food follows its fixed waste mix. With
-    a completed route, only food not ultimately distributed follows that mix.
-    Transport uses tonne-kilometres and the collected bakery food as cargo mass.
+    Without a completed route, all bakery food follows the bakery's fixed waste
+    mix. With a completed route, unusable food remains on the bakery ledger and
+    pantry-undistributed food follows the pantry's landfill/pig-farm mix.
+    Transport uses tonne-kilometres and usable food as cargo mass.
     """
 
     if route_distance_miles < 0:
         raise ValueError("route_distance_miles cannot be negative")
     if not 0 <= pantry_distribution_fraction <= 1:
         raise ValueError("pantry_distribution_fraction must be between 0 and 1")
+    if abs(pantry_waste_allocation.compost) > 1e-9:
+        raise ValueError("pantry waste allocation cannot include compost")
 
     food_kg = pickup.estimated_food_kg
-    food_saved_kg = food_kg * pickup.usable_fraction * pantry_distribution_fraction
-    collected_not_distributed_kg = max(0.0, food_kg - food_saved_kg)
-    allocation = pickup.waste_allocation
-    mixed_waste_coefficient = (
-        allocation.landfill * assumptions.landfill_kg_co2e_per_kg_waste
-        + allocation.pig_farm * assumptions.pig_farm_kg_co2e_per_kg_waste
-        + allocation.compost * assumptions.compost_kg_co2e_per_kg_waste
+    usable_food_kg = food_kg * pickup.usable_fraction
+    food_saved_kg = usable_food_kg * pantry_distribution_fraction
+    bakery_unusable_food_kg = max(0.0, food_kg - usable_food_kg)
+    pantry_undistributed_food_kg = max(0.0, usable_food_kg - food_saved_kg)
+    collected_not_distributed_kg = (
+        bakery_unusable_food_kg + pantry_undistributed_food_kg
     )
-    counterfactual_waste = food_kg * mixed_waste_coefficient
-    route_waste = collected_not_distributed_kg * mixed_waste_coefficient
+    bakery_allocation = pickup.waste_allocation
+    bakery_waste_coefficient = (
+        bakery_allocation.landfill * assumptions.landfill_kg_co2e_per_kg_waste
+        + bakery_allocation.pig_farm * assumptions.pig_farm_kg_co2e_per_kg_waste
+        + bakery_allocation.compost * assumptions.compost_kg_co2e_per_kg_waste
+    )
+    pantry_waste_coefficient = (
+        pantry_waste_allocation.landfill * assumptions.landfill_kg_co2e_per_kg_waste
+        + pantry_waste_allocation.pig_farm * assumptions.pig_farm_kg_co2e_per_kg_waste
+    )
+    counterfactual_waste = food_kg * bakery_waste_coefficient
+    bakery_route_waste = bakery_unusable_food_kg * bakery_waste_coefficient
+    pantry_route_waste = pantry_undistributed_food_kg * pantry_waste_coefficient
+    route_waste = bakery_route_waste + pantry_route_waste
     avoided_waste = counterfactual_waste - route_waste
     avoided_production = (
         food_saved_kg
@@ -117,7 +140,7 @@ def estimate_route_environmental_impact(
     )
     transport = (
         assumptions.transport_kg_co2e_per_tonne_km
-        * (food_kg / 1_000.0)
+        * (usable_food_kg / 1_000.0)
         * (route_distance_miles * MILES_TO_KILOMETERS)
     )
     net_benefit = avoided_waste + avoided_production - transport
@@ -128,7 +151,11 @@ def estimate_route_environmental_impact(
         pantry_distribution_fraction=pantry_distribution_fraction,
         food_saved_kg=food_saved_kg,
         collected_not_distributed_kg=collected_not_distributed_kg,
+        bakery_unusable_food_kg=bakery_unusable_food_kg,
+        pantry_undistributed_food_kg=pantry_undistributed_food_kg,
         counterfactual_waste_kg_co2e=counterfactual_waste,
+        bakery_route_waste_kg_co2e=bakery_route_waste,
+        pantry_route_waste_kg_co2e=pantry_route_waste,
         route_waste_kg_co2e=route_waste,
         avoided_waste_kg_co2e=avoided_waste,
         avoided_production_kg_co2e=avoided_production,

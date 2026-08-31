@@ -70,10 +70,12 @@ H_{bpd}=Q_{bd}U_{bd}D_p.
 ```
 
 Food-available bakery occurrences with no completed pickup are recorded as
-uncollected bakery food. For a completed route, $Q-H$ is collected food not
-ultimately distributed. Each bakery's fixed landfill, pig-farm, and compost mix
-values those two cases; tonne-kilometre transport emissions are then subtracted.
-Avoided production is held at zero in the primary score.
+uncollected bakery food and follow the bakery's landfill/pig-farm/compost mix.
+For a completed route, bakery-unusable food $Q(1-U)$ follows that same bakery
+mix, while pantry-undistributed food $QU(1-D)$ follows the destination pantry's
+unique landfill/pig-farm mix. Every pantry mix sums to 100% and assigns 0% to
+compost. Tonne-kilometre transport emissions for usable cargo are then
+subtracted. Avoided production is held at zero in the primary score.
 
 The normalized expected-impact objective is
 

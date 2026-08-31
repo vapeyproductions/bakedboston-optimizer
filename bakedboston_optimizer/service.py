@@ -11,7 +11,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .google_maps import GoogleMapsProvider
-from .models import AddressValidationStatus, BakeryPickup, DriverRequest, Location, Pantry
+from .models import AddressValidationStatus, BakeryPickup, DriverRequest, Location, Pantry, WasteAllocation
 from .network import BakedBostonNetworkClient, NetworkSnapshot, parse_snapshot
 from .optimizer import active_solver_backend, optimize_network, rank_routes
 from .simulation import SimulationConfig, simulate_snapshot
@@ -478,6 +478,15 @@ def _pantries(snapshot: NetworkSnapshot, earliest: datetime, latest: datetime) -
             receiving_end=ends,
             latest_permitted_arrival=latest_arrival,
             priority_score=1 / (1 + deliveries),
+            distribution_fraction=(
+                pantry.pantry_distribution_fraction
+                if pantry.pantry_distribution_fraction is not None
+                else 1.0
+            ),
+            waste_allocation=(
+                pantry.waste_allocation
+                or WasteAllocation(landfill=0.40, pig_farm=0.60, compost=0.0)
+            ),
         ))
     for pantry in pantries.values():
         results.extend(_recurring_pantry_windows(snapshot, pantry, earliest, latest))
@@ -529,6 +538,15 @@ def _recurring_pantry_windows(snapshot: NetworkSnapshot, record: Any, earliest: 
                 receiving_end=ends,
                 latest_permitted_arrival=latest_arrival,
                 priority_score=1 / (1 + deliveries),
+                distribution_fraction=(
+                    record.pantry_distribution_fraction
+                    if record.pantry_distribution_fraction is not None
+                    else 1.0
+                ),
+                waste_allocation=(
+                    record.waste_allocation
+                    or WasteAllocation(landfill=0.40, pig_farm=0.60, compost=0.0)
+                ),
             ))
         current += timedelta(days=1)
     return results

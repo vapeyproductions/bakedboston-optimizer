@@ -239,6 +239,7 @@ def _pantry(item: dict[str, Any]) -> OrganizationRecord:
             "serviceModes": item.get("serviceModes", "[]"),
             "deliveriesSevenDays": item.get("deliveriesSevenDays", 0),
         },
+        waste_allocation=_pantry_waste_allocation(item.get("wasteAllocation")),
         pantry_distribution_fraction=distribution_fraction,
     )
 
@@ -275,6 +276,13 @@ def _waste_allocation(value: object) -> WasteAllocation | None:
         pig_farm=float(value.get("pigFarm", 0.0)),
         compost=float(value.get("compost", 0.0)),
     )
+
+
+def _pantry_waste_allocation(value: object) -> WasteAllocation | None:
+    allocation = _waste_allocation(value)
+    if allocation is not None and abs(allocation.compost) > 1e-9:
+        raise ValueError("pantry waste allocation cannot include compost")
+    return allocation
 
 
 def _driver(item: dict[str, Any]) -> DriverRecord:

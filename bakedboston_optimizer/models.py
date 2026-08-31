@@ -97,6 +97,11 @@ class Pantry:
     latest_permitted_arrival: datetime
     priority_score: float
     distribution_fraction: float = 1.0
+    waste_allocation: WasteAllocation = WasteAllocation(
+        landfill=0.40,
+        pig_farm=0.60,
+        compost=0.0,
+    )
     historical_raw_food_kg: float = 0.0
     historical_saved_food_kg: float = 0.0
 
@@ -105,6 +110,8 @@ class Pantry:
             raise ValueError("priority_score must be between 0 and 1")
         if not 0 <= self.distribution_fraction <= 1:
             raise ValueError("distribution_fraction must be between 0 and 1")
+        if abs(self.waste_allocation.compost) > 1e-9:
+            raise ValueError("pantry waste allocation cannot include compost")
         if self.historical_raw_food_kg < 0 or self.historical_saved_food_kg < 0:
             raise ValueError("historical food totals cannot be negative")
 
@@ -197,6 +204,12 @@ class RouteCandidate:
     pantry_historical_saved_food_kg: float = 0.0
     food_saved_kg: float = 0.0
     collected_not_distributed_kg: float = 0.0
+    bakery_unusable_food_kg: float = 0.0
+    pantry_undistributed_food_kg: float = 0.0
+    bakery_route_waste_kg_co2e: float = 0.0
+    pantry_route_waste_kg_co2e: float = 0.0
+    pantry_landfill_fraction: float = 0.0
+    pantry_pig_farm_fraction: float = 0.0
     counterfactual_waste_kg_co2e: float = 0.0
     route_waste_kg_co2e: float = 0.0
     avoided_system_kg_co2e: float = 0.0

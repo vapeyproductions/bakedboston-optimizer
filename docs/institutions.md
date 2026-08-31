@@ -25,17 +25,23 @@ Waste columns are fixed shares and sum to 100% for each bakery.
 
 ## Pantries
 
-| Pantry | Coordinates | ZIP | Recurring receiving window | Latest arrival | Distribution fraction |
-| --- | --- | --- | --- | --- | ---: |
-| Downtown Community Shelf | 42.3552, -71.0603 | 02108 | Mon–Fri 16:15–18:00 | 17:50 | 70.7% |
-| Dorchester Food Cabinet | 42.3017, -71.0602 | 02122 | Mon–Fri 16:30–18:15 | 18:05 | 66.3% |
-| Allston Neighborhood Pantry | 42.3541, -71.1346 | 02134 | Mon–Fri 16:45–18:30 | 18:20 | 83.4% |
-| Cambridge Mutual Aid Pantry | 42.3812, -71.1124 | 02140 | Mon–Fri 17:00–19:00 | 18:50 | 81.8% |
-| East Boston Open Fridge | 42.3755, -71.0350 | 02128 | Mon–Fri 17:15–18:30 | 18:20 | 81.9% |
-| Jamaica Plain Community Fridge | 42.3182, -71.1120 | 02130 | Mon–Fri 15:45–19:00 | 18:50 | 63.8% |
-| Brighton Mutual Aid Shelf | 42.3504, -71.1650 | 02135 | Tue/Thu 17:30–19:30 | 19:20 | 71.0% |
-| Charlestown Neighborhood Pantry | 42.3785, -71.0640 | 02129 | Mon/Wed/Fri 17:45–19:00 | 18:50 | 66.1% |
-| Mission Hill Open Shelf | 42.3337, -71.1050 | 02120 | Mon–Fri 16:00–18:45 | 18:35 | 80.8% |
+Each pantry has a unique fixed redistribution-waste allocation. Landfill and
+pig-farm shares sum to 100%; pantry compost is fixed at 0%. Guo et al. report a
+40% landfill / 60% pig-farm baseline and test 20%–60% landfill in sensitivity
+analysis. These fictional pantry scenarios use a conservative 28%–52% landfill
+band around that baseline; the differences are not measured institutional data.
+
+| Pantry | Coordinates | ZIP | Recurring receiving window | Latest arrival | Distribution fraction | Landfill | Pig farm |
+| --- | --- | --- | --- | --- | ---: | ---: | ---: |
+| Downtown Community Shelf | 42.3552, -71.0603 | 02108 | Mon–Fri 16:15–18:00 | 17:50 | 70.7% | 40% | 60% |
+| Dorchester Food Cabinet | 42.3017, -71.0602 | 02122 | Mon–Fri 16:30–18:15 | 18:05 | 66.3% | 34% | 66% |
+| Allston Neighborhood Pantry | 42.3541, -71.1346 | 02134 | Mon–Fri 16:45–18:30 | 18:20 | 83.4% | 46% | 54% |
+| Cambridge Mutual Aid Pantry | 42.3812, -71.1124 | 02140 | Mon–Fri 17:00–19:00 | 18:50 | 81.8% | 31% | 69% |
+| East Boston Open Fridge | 42.3755, -71.0350 | 02128 | Mon–Fri 17:15–18:30 | 18:20 | 81.9% | 43% | 57% |
+| Jamaica Plain Community Fridge | 42.3182, -71.1120 | 02130 | Mon–Fri 15:45–19:00 | 18:50 | 63.8% | 37% | 63% |
+| Brighton Mutual Aid Shelf | 42.3504, -71.1650 | 02135 | Tue/Thu 17:30–19:30 | 19:20 | 71.0% | 49% | 51% |
+| Charlestown Neighborhood Pantry | 42.3785, -71.0640 | 02129 | Mon/Wed/Fri 17:45–19:00 | 18:50 | 66.1% | 28% | 72% |
+| Mission Hill Open Shelf | 42.3337, -71.1050 | 02120 | Mon–Fri 16:00–18:45 | 18:35 | 80.8% | 52% | 48% |
 
 ## Fixed environmental coefficients
 
@@ -45,9 +51,9 @@ named organization.
 
 | Quantity | Fixed value | Unit | Role in the primary model |
 | --- | ---: | --- | --- |
-| Landfill food-waste pathway | 0.36 | kg CO₂e / kg waste | Values the bakery no-pickup outcome and the food remaining after a completed route. |
-| Pig-farm food-waste pathway | -0.12 | kg CO₂e / kg waste | Values the corresponding share of those waste outcomes. The negative sign represents a modeled credit in the academic scenario. |
-| Compost food-waste pathway | 0.00581 | kg CO₂e / kg waste | Values the corresponding share of those waste outcomes. |
+| Landfill food-waste pathway | 0.36 | kg CO₂e / kg waste | Values the landfill share of bakery and pantry waste. |
+| Pig-farm food-waste pathway | -0.12 | kg CO₂e / kg waste | Values the pig-farm share of bakery and pantry waste. The negative sign represents a modeled credit in the academic scenario. |
+| Compost food-waste pathway | 0.00581 | kg CO₂e / kg waste | Values bakery compost only; pantry compost is fixed at 0%. |
 | Transportation | 0.41947 | kg CO₂e / tonne-km | Multiplied by route tonne-kilometres and subtracted from the waste-pathway benefit. |
 | Avoided food production | 0.38 | kg CO₂e / kg food | Retained for sensitivity analysis; its primary-objective substitution fraction is fixed at 0%. |
 
@@ -57,16 +63,23 @@ For bakery $b$, the pathway coefficient is
 e_b=0.36L_b-0.12P_b+0.00581C_b.
 ```
 
+For pantry $p$, the two-pathway coefficient is
+
+```math
+e_p=0.36L_p-0.12P_p,\qquad L_p+P_p=1.
+```
+
 For a completed bakery–pantry route, the ultimate saved food is
 
 ```math
 H_{bpd}=Q_{bd}U_{bd}D_p,
 ```
 
-the collected food not ultimately distributed is $W_{bpd}=Q_{bd}-H_{bpd}$,
-and the primary direct environmental benefit is the difference between the
-bakery no-pickup waste outcome and the completed-route waste outcome, less
-transportation emissions. The full derivation and source interpretation are in
+bakery-unusable food is $W^B_{bd}=Q_{bd}(1-U_{bd})$, and pantry-undistributed
+food is $W^P_{bpd}=Q_{bd}U_{bd}(1-D_p)$. The primary direct environmental
+benefit is the difference between the bakery no-pickup waste outcome and those
+two completed-route waste outcomes, less transportation emissions. The full
+derivation and source interpretation are in
 [`model.md`](model.md) and [`research.md`](research.md).
 
 The machine-readable source of truth is

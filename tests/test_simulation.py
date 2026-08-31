@@ -47,6 +47,7 @@ class SimulationTests(unittest.TestCase):
                 "latitude": 42.360,
                 "longitude": -71.060,
                 "distributionFraction": 0.75,
+                "wasteAllocation": {"landfill":0.35,"pigFarm":0.65,"compost":0.0},
                 "recurringDays": "Mon",
                 "openTime": '[{"recurrence":"weekly","day":"Mon","time":"16:30"}]',
                 "closeTime": '[{"recurrence":"weekly","day":"Mon","time":"19:00"}]',
@@ -86,6 +87,8 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(pantries[0][0].latest_permitted_arrival.minute, 45)
         self.assertEqual(pantries[0][1], "unattended")
         self.assertEqual(pantries[0][0].distribution_fraction, 0.75)
+        self.assertEqual(pantries[0][0].waste_allocation.landfill, 0.35)
+        self.assertEqual(pantries[0][0].waste_allocation.pig_farm, 0.65)
 
     def test_seeded_simulation_produces_repeatable_assignments(self) -> None:
         config = SimulationConfig(

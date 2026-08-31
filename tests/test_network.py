@@ -1,11 +1,25 @@
 from __future__ import annotations
 
+import json
 import unittest
+from pathlib import Path
 
 from bakedboston_optimizer.network import parse_snapshot
 
 
 class NetworkTests(unittest.TestCase):
+    def test_academic_pantries_have_unique_two_pathway_waste_allocations(self) -> None:
+        payload = json.loads(
+            (Path(__file__).resolve().parents[1] / "data" / "academic_comparison_snapshot.json").read_text()
+        )
+        snapshot = parse_snapshot(payload)
+        allocations = [pantry.waste_allocation for pantry in snapshot.pantries]
+
+        self.assertEqual(len({item.landfill for item in allocations}), len(allocations))
+        for allocation in allocations:
+            self.assertAlmostEqual(allocation.landfill + allocation.pig_farm, 1.0)
+            self.assertEqual(allocation.compost, 0.0)
+
     def test_private_feed_is_parsed_without_contact_data(self) -> None:
         snapshot = parse_snapshot({
             "schemaVersion": 1,
@@ -99,6 +113,7 @@ class NetworkTests(unittest.TestCase):
                 "latitude": 42.36,
                 "longitude": -71.05,
                 "distributionFraction": 0.76,
+                "wasteAllocation": {"landfill": 0.35, "pigFarm": 0.65, "compost": 0.0},
             }],
         })
 
@@ -109,6 +124,9 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(bakery.usable_fraction_distribution.mode, 0.8)
         self.assertEqual(bakery.waste_allocation.pig_farm, 0.35)
         self.assertEqual(pantry.pantry_distribution_fraction, 0.76)
+        self.assertEqual(pantry.waste_allocation.landfill, 0.35)
+        self.assertEqual(pantry.waste_allocation.pig_farm, 0.65)
+        self.assertEqual(pantry.waste_allocation.compost, 0.0)
 
 
 if __name__ == "__main__":

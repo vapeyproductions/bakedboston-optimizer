@@ -178,8 +178,8 @@ continues to enforce current driver origin, hard search horizon, bakery pickup
 readiness/deadline, pantry receiving window/latest arrival, and route timing.
 
 The comparator uses daily bakery food/usability draws, fixed pantry
-distribution fractions, bakery waste allocations, route distance, and the
-existing fixed direct-emissions coefficients. It does **not** use:
+distribution fractions, bakery and pantry waste allocations, route distance,
+and the existing fixed direct-emissions coefficients. It does **not** use:
 
 - soft requested-start or destination-ZIP fit;
 - sigmoid acceptance probability;
@@ -289,11 +289,13 @@ recovered is
 H_{bpd}=Q_{bd}U_{bd}D_p.
 ```
 
-Food wasted is the sum of all uncollected bakery food and the collected route
-remainder $Q_{bd}-H_{bpd}$. Environmental reporting applies the same fixed
-landfill/pig-farm/compost and tonne-kilometre coefficients to all four models and
-reports transportation CO₂e, net waste-pathway CO₂e, their total direct CO₂e,
-and net environmental benefit.
+Food wasted is the sum of all uncollected bakery food and the route remainder
+$Q_{bd}-H_{bpd}$. The latter is split into bakery-unusable food
+$Q_{bd}(1-U_{bd})$, valued with the bakery's landfill/pig-farm/compost mix, and
+pantry-undistributed food $Q_{bd}U_{bd}(1-D_p)$, valued with the pantry's unique
+landfill/pig-farm mix. Environmental reporting applies the same pathway and
+tonne-kilometre coefficients to all four models and reports transportation
+CO₂e, net waste-pathway CO₂e, total direct CO₂e, and net environmental benefit.
 
 The same transparent sigmoid evaluates every selected route after optimization.
 The public deterministic replay reports mean expected acceptance and the shares

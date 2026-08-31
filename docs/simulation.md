@@ -89,7 +89,7 @@ models make different earlier selections.
   number of assigned food-ready pickups and then minimizes total direct system
   CO₂e: uncollected bakery waste plus selected-route residual waste and
   transport. It uses the current driver origin, hard timing feasibility, daily
-  food/usability, pantry distribution, bakery waste allocation, route distance,
+  food/usability, pantry distribution, bakery and pantry waste allocations, route distance,
   and the existing fixed direct-emissions coefficients. It does not use soft
   preferences, sigmoid acceptance, pantry fairness/priority/coverage, avoided
   production, packaging, meal-class, or unobserved driver-familiarity inputs.
@@ -163,9 +163,9 @@ The comparison report includes:
 - distribution fairness as a pantry-service Gini coefficient and service gap;
 - mean drive time, distance, preferred-destination deviation, and
   total trip duration;
-- ultimately saved food $Q\times U\times D$, bakery food not picked up, and
-  collected food not ultimately distributed, plus total food wasted as the sum
-  of those last two waste sources;
+- ultimately saved food $Q\times U\times D$, bakery food not picked up,
+  bakery-unusable food $Q(1-U)$, and pantry-undistributed food
+  $QU(1-D)$, plus total food wasted as the aggregate of those sources;
 - transport kg CO₂e, net waste-pathway kg CO₂e for landfill/pig-farm/compost,
   total direct kg CO₂e, and net direct environmental benefit;
 - offers, accepted routes, simulated rejections, expected acceptance, likely

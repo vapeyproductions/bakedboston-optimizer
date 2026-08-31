@@ -2160,6 +2160,7 @@ def _candidate(
         route_distance_miles,
         environmental_assumptions,
         pantry_distribution_fraction=pantry.distribution_fraction,
+        pantry_waste_allocation=pantry.waste_allocation,
     )
     score = (
         weights.pantry_priority_reward * pantry.priority_score
@@ -2212,6 +2213,18 @@ def _candidate(
         collected_not_distributed_kg=(
             environmental_impact.collected_not_distributed_kg
         ),
+        bakery_unusable_food_kg=environmental_impact.bakery_unusable_food_kg,
+        pantry_undistributed_food_kg=(
+            environmental_impact.pantry_undistributed_food_kg
+        ),
+        bakery_route_waste_kg_co2e=(
+            environmental_impact.bakery_route_waste_kg_co2e
+        ),
+        pantry_route_waste_kg_co2e=(
+            environmental_impact.pantry_route_waste_kg_co2e
+        ),
+        pantry_landfill_fraction=pantry.waste_allocation.landfill,
+        pantry_pig_farm_fraction=pantry.waste_allocation.pig_farm,
         counterfactual_waste_kg_co2e=(
             environmental_impact.counterfactual_waste_kg_co2e
         ),

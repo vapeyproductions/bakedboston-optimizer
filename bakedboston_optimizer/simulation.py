@@ -551,6 +551,10 @@ def _pantry_windows(
                     if record.pantry_distribution_fraction is not None
                     else 1.0
                 ),
+                waste_allocation=(
+                    record.waste_allocation
+                    or WasteAllocation(landfill=0.40, pig_farm=0.60, compost=0.0)
+                ),
             ), mode))
     for window in snapshot.availability_windows:
         if window.get("organizationType") != "pantry" or window.get("paused"):
@@ -578,6 +582,10 @@ def _pantry_windows(
                 record.pantry_distribution_fraction
                 if record.pantry_distribution_fraction is not None
                 else 1.0
+            ),
+            waste_allocation=(
+                record.waste_allocation
+                or WasteAllocation(landfill=0.40, pig_farm=0.60, compost=0.0)
             ),
         ), str(window.get("serviceMode") or "staffed")))
     return sorted(result, key=lambda item: (item[0].receiving_start, item[0].id))
