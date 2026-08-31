@@ -24,9 +24,9 @@ For each simulated day, the system:
 6. removes time-infeasible driver–bakery–pantry combinations;
 7. estimates each route's probability of volunteer acceptance with an explicit,
    synthetic participation model;
-8. asks Gurobi to maximize expected completed pickups and then, within 1% of
-   that optimum, maximize a normalized food, fairness, environmental, and
-   driver-fit objective;
+8. asks Gurobi to maximize one normalized expected-impact objective in which
+   modeled acceptance scales food, fairness, environmental, and driver-fit
+   value;
 9. records the virtual timeline, assignments, solver diagnostics, and outcomes.
 
 Nothing in a simulation run writes to an organization record, creates an
@@ -43,31 +43,25 @@ not the departure time. For each feasible timed column $a$:
 x_a \in \{0,1\}
 ```
 
-Gurobi uses two hierarchical objectives:
-
-1. maximize the expected number of completed bakery pickup occurrences;
-2. among solutions retaining at least 99% of the best first-stage value,
-   maximize pantry priority and sustainable-logistics quality.
+Gurobi uses one acceptance-adjusted objective. It does not require a selected
+route to remain within an arbitrary percentage of the greatest modeled
+acceptance probability.
 
 For route $r$, let $m_r$ be drive minutes, $w_r$ the share of the requested
 time window missed, and $s_r$ the normalized start/destination-area miss. The
-first-stage coefficient is the following clipped logistic estimate—not
+acceptance coefficient is the following clipped logistic estimate—not
 observed behavior or a trained ML model:
 
 ```math
 a_r=\min\!\left\{0.98,\max\!\left\{0.02,\frac{1}{1+\exp\!\left[-\left(2.2-0.045m_r-1.8w_r-1.1s_r\right)\right]}\right\}\right\}.
 ```
 
-The optimizer's first stage is therefore
-
-```math
-\max \sum_{r\in R} a_r x_r.
-```
-
 This directly tests BakedBoston's thesis: a route that technically moves food
-is not useful if its burden makes a volunteer unlikely to accept it. The
-coefficients are reproducible academic assumptions and must not be presented as
-empirically calibrated until real choice data exist.
+is less useful when its burden makes completion less likely, but a small
+difference in modeled acceptance must not veto a route with materially greater
+food, fairness, or environmental value. The coefficients are reproducible
+academic assumptions and must not be presented as empirically calibrated until
+real choice data exist.
 
 For bakery $b$, pantry $p$, and simulated day $d$, route food saved is:
 
@@ -81,17 +75,19 @@ ultimately distributed. Each bakery's fixed landfill, pig-farm, and compost mix
 values those two cases; tonne-kilometre transport emissions are then subtracted.
 Avoided production is held at zero in the primary score.
 
-The normalized second-stage objective is
+The normalized expected-impact objective is
 
 ```math
 10C+10V_Q+10F_Q+10V_H+10F_H+10P+20E+20D,
 ```
 
 covering pantry reach, raw and saved-food volume/evenness, opportunity priority,
-net direct CO₂ benefit, and driver fit. See [docs/model.md](docs/model.md) for
-the full formulation and [docs/institutions.md](docs/institutions.md) for every
-fixed institution input, waste allocation, distribution fraction, and
-environmental coefficient.
+net direct CO₂ benefit, and driver fit. Route contributions and pantry food
+totals are weighted by $a_r$. For a single driver, the comparison is modeled
+acceptance multiplied by the route's completed-impact score. See
+[docs/model.md](docs/model.md) for the full formulation and
+[docs/institutions.md](docs/institutions.md) for every fixed institution input,
+waste allocation, distribution fraction, and environmental coefficient.
 
 Opening the app creates a decision epoch; it does not force immediate
 departure. The route generator chooses a just-in-time departure, includes 5
@@ -187,8 +183,8 @@ python3 -m bakedboston_optimizer.compare \
 ```
 
 Use `--disable-acceptance` for a deterministic routing-capacity sensitivity
-analysis. In a participation-aware sensitivity experiment, the first-stage MIP
-uses expected acceptance while the event replay samples accept/reject outcomes
+analysis. In a participation-aware sensitivity experiment, the MIP uses
+acceptance-adjusted expected impact while the event replay samples accept/reject outcomes
 from the same transparent behavioral assumptions. Expected acceptance and
 likely-rejection measures remain model-based diagnostics, not observed behavior.
 `--matching-interval-minutes` controls how closely arriving drivers are grouped
@@ -380,9 +376,9 @@ No policy is expected to win every column. A highest-priority-first rule can,
 for example, produce a lower pantry-service Gini coefficient while leaving an
 eligible pickup unserved. A shortest-route rule can minimize driving while
 repeatedly serving fewer pantries. The MIP is evaluated against its declared
-hierarchical objective: first maximize expected completed pickups, then
-maximize social and sustainable-logistics quality within 1% of that best
-expected-completion value, subject to assignment and timing constraints.
+acceptance-adjusted expected-impact objective, which balances participation
+with social and sustainable-logistics quality subject to assignment and timing
+constraints.
 
 ## Repository structure
 

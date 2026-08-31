@@ -40,6 +40,7 @@ from .optimizer import (
     optimize_horner_slsf_noz_candidates,
     optimize_nair_distance_first_candidates,
     optimize_xue_zou_total_curb_candidates,
+    score_assignment_candidates,
     solver_version,
 )
 from .simulation import (
@@ -911,19 +912,22 @@ def run_policy(
                 weights=weights,
             )
             participation_model = _participation_model(scenario.config)
-            candidates = [
-                replace(
-                    candidate,
-                    route=replace(
-                        candidate.route,
-                        acceptance_probability=estimate_acceptance_probability(
+            candidates = score_assignment_candidates(
+                [
+                    replace(
+                        candidate,
+                        route=replace(
                             candidate.route,
-                            participation_model,
+                            acceptance_probability=estimate_acceptance_probability(
+                                candidate.route,
+                                participation_model,
+                            ),
                         ),
-                    ),
-                )
-                for candidate in candidates
-            ]
+                    )
+                    for candidate in candidates
+                ],
+                weights,
+            )
             candidate_count += len(candidates)
             realized_willingness = {
                 _candidate_key(candidate): (

@@ -23,17 +23,20 @@ adding BakedBoston-specific objectives to a comparison model.
 
 ## BakedBoston
 
-BakedBoston uses binary route-column decisions $x_r$. Its first objective
-maximizes expected completed pickups:
+BakedBoston uses binary route-column decisions $x_r$ and a transparent modeled
+acceptance probability $a_r$. It maximizes one normalized expected-impact
+objective:
 
 ```math
-A^* = \max \sum_{r \in R} a_r x_r.
+Z^E=10C^E+10V_Q^E+10F_Q^E+10V_H^E+10F_H^E+10P^E+20E^E+20D^E.
 ```
 
-Its second objective balances normalized food volume/evenness, pantry coverage
-and priority, direct net environmental benefit, and driver fit while retaining
-at least 99% of $A^*$. The complete formulation is in
-[model.md](model.md).
+The superscript $E$ indicates that route contributions and cumulative pantry
+food totals are weighted by modeled completion probability. In the one-driver
+case, this reduces to comparing $a_r I_r$, where $I_r$ is route $r$'s
+normalized food, fairness, environmental, pantry, and driver-fit value if
+completed. There is no 99%-of-best-acceptance filter. The complete formulation
+is in [model.md](model.md).
 
 BakedBoston is treated as a route-choice policy in the public replay. After the
 joint assignment resolves conflicts, each driver receives a conflict-free menu

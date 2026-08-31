@@ -70,10 +70,11 @@ not advantages given only to BakedBoston. The seeded exogenous events remain
 identical, while later available-pickup state can legitimately diverge after
 models make different earlier selections.
 
-- **BakedBoston MIP:** maximizes expected completed pickups, then retains at
-  least 99% of that value while balancing normalized pantry coverage, raw and
-  saved-food volume/evenness, opportunity priority, net direct CO₂e benefit,
-  and driver fit.
+- **BakedBoston MIP:** maximizes one acceptance-adjusted expected-impact score
+  balancing normalized pantry coverage, raw and saved-food volume/evenness,
+  opportunity priority, net direct CO₂e benefit, and driver fit. A route with
+  slightly lower modeled acceptance can therefore be selected when its broader
+  impact is materially stronger.
 - **Nair et al. distance-first adaptation:** a minimal volunteer-route
   adaptation of the periodic unpaired pickup-and-delivery model in Nair,
   Rashidi, and Dixit (2018). It first maximizes the number of assigned
@@ -131,8 +132,8 @@ platform's recourse assignment is recorded as the final selection.
 An offered route is accepted with a seeded logistic probability that decreases
 with drive minutes, the proportional requested-time-window miss, and normalized
 start/destination-area miss. Planned waiting before departure is not treated as
-a burden. The same transparent estimate supplies the primary MIP's first-stage
-coefficient, so participation is part of the routing decision rather than only
+a burden. The same transparent estimate scales route contributions in the
+primary MIP's expected-impact objective, so participation is part of the routing decision rather than only
 an after-the-fact dashboard diagnostic. This is an explicit behavioral
 assumption, not a trained machine-learning model. It can be disabled for a pure
 routing-capacity sensitivity analysis.

@@ -182,48 +182,78 @@ estimate to $[0.02,0.98]$ for stable scenario analysis. It is intentionally simp
 inspectable, and replaceable. These coefficients are synthetic assumptions,
 not learned from volunteer behavior and not validated probabilities.
 
-## Hierarchical objectives
+## Acceptance-adjusted expected-impact objective
 
-The Gurobi model uses two ordered objectives. First, maximize the expected
-number of completed pickups:
-
-```math
-Z_1 = \max \sum_{a \in A} a_a x_a
-```
-
-where $a_a$ is the estimated acceptance probability of timed route column
-$a$. A technically feasible assignment with low predicted acceptance can
-therefore lose to a more volunteer-compatible assignment with greater expected
-completion.
-
-Second, among solutions retaining at least 99% of the optimal first-stage
-value, maximize a normalized 100-point score:
+The Gurobi model uses one normalized 100-point objective:
 
 ```math
-Z_2=10C+10V_Q+10F_Q+10V_H+10F_H+10P+20E+20D.
+Z^E=10C^E+10V_Q^E+10F_Q^E+10V_H^E+10F_H^E+10P^E+20E^E+20D^E.
 ```
 
-Every component lies in $[0,1]$: pantry coverage $C$, selected raw-food
-volume $V_Q$, cumulative raw-food evenness $F_Q$, ultimately saved-food
-volume $V_H$, cumulative saved-food evenness $F_H$, opportunity priority
-$P$, min–max-normalized direct environmental benefit $E$, and normalized
-driver fit $D$. Priority and the per-route environmental and driver-fit
-values are summed over selected routes and divided by the epoch's maximum
-feasible assignment count. Binary pantry-visit variables model coverage;
-auxiliary continuous variables linearize pairwise absolute pantry food-balance
-gaps. Cumulative totals carry forward across rolling epochs. This encourages
-balanced allocation but does not claim the stronger envy-free property.
+The superscript $E$ denotes acceptance-adjusted expected outcome. For every
+route-dependent contribution, the model uses $a_r x_r$ rather than $x_r$
+alone. For example:
 
-The 1% tolerance avoids sacrificing meaningful expected completion for a
-secondary improvement while allowing the solver to choose a materially fairer,
-more volunteer-compatible, or environmentally stronger solution when its
-participation performance is essentially tied.
+```math
+V_Q^E=\frac{\sum_{r\in A}a_rQ_rx_r}{\sum_{b\in B}Q_b},
+\qquad
+V_H^E=\frac{\sum_{r\in A}a_rH_rx_r}{\sum_{b\in B}\max_{r:b(r)=b}H_r}.
+```
 
-This is deliberately **not** an average-score objective. Maximizing the average
-of recommendation menus can improve the displayed mean while serving fewer
-pickups. The hierarchical expected-completion objective makes the operational
-priority explicit and gives route quality control only after participation has
-been protected.
+Expected pantry food totals are
+
+```math
+\bar Q_p=Q_p^{\mathrm{history}}+\sum_{r:p(r)=p}a_rQ_rx_r,
+\qquad
+\bar H_p=H_p^{\mathrm{history}}+\sum_{r:p(r)=p}a_rH_rx_r.
+```
+
+The raw- and saved-food evenness terms $F_Q^E$ and $F_H^E$ apply the existing
+normalized pairwise absolute-gap calculation to $\bar Q_p$ and $\bar H_p$.
+Auxiliary continuous variables linearize those gaps. Expected pantry coverage
+uses one continuous credit $c_p^E\in[0,1]$ per pantry with
+
+```math
+c_p^E\leq\sum_{r:p(r)=p}a_rx_r,
+\qquad
+C^E=\frac{1}{|P|}\sum_{p\in P}c_p^E.
+```
+
+The cap prevents multiple simultaneous assignments to one pantry from earning
+unbounded coverage credit. It is exact for the one-driver case and is a linear
+capped-expectation approximation when several independently accepted routes can
+reach the same pantry in one epoch.
+
+Opportunity priority, min–max-normalized direct environmental benefit, and
+normalized driver fit are likewise multiplied by $a_r$ before being summed and
+divided by the epoch's maximum feasible assignment count. Every normalized
+component remains bounded by $[0,1]$. Cumulative pantry totals carry forward
+across rolling epochs. This encourages balanced allocation but does not claim
+the stronger envy-free property.
+
+For the one-driver walkthrough, let
+
+```math
+I_r=10C_r+10V_{Q,r}+10F_{Q,r}+10V_{H,r}+10F_{H,r}+10P_r+20E_r+20D_r
+```
+
+be route $r$'s completed-impact score. The comparison exposed to the driver is
+then
+
+```math
+Z_r^E=a_rI_r.
+```
+
+Thus, an 80% route does not automatically eliminate a 78% route. The latter can
+win when its food recovery, pantry equity, environmental result, priority, or
+driver fit makes its acceptance-adjusted expected impact larger. There is no
+99%-of-best-acceptance constraint.
+
+This is deliberately **not** an average-menu-score objective. Maximizing the
+average of recommendation menus can improve the displayed mean while serving
+fewer useful pickups. The single expected-impact objective instead makes the
+participation tradeoff explicit inside the same score as the outcomes that
+motivate the delivery.
 
 At each rolling decision epoch, the model solves over all drivers who arrived in
 that epoch and all pickups still available. Accepted assignments consume their
@@ -275,7 +305,7 @@ The API returns the selected assignments plus:
 - feasible candidate count;
 - matched assignment count;
 - expected completed deliveries;
-- normalized food/fairness/environment/driver-fit score;
+- normalized acceptance-adjusted food/fairness/environment/driver-fit score;
 - total route mileage;
 - ultimately saved food;
 - bakery food not picked up;

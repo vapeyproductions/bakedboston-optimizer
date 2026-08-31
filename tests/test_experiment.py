@@ -224,7 +224,7 @@ class ExperimentTests(unittest.TestCase):
             payload["policyMetadata"]["horner_2021_slsf_noz"]["selectionMode"],
             "direct_assignment",
         )
-        self.assertEqual(payload["schemaVersion"], 3)
+        self.assertEqual(payload["schemaVersion"], 4)
         self.assertEqual(
             set(payload["totalImpactMethodology"]["pillars"]),
             {"service", "food", "environment", "equity", "volunteer", "efficiency"},

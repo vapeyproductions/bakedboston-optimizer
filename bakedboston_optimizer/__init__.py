@@ -16,6 +16,7 @@ from .optimizer import (
     optimize_assignment_candidates,
     optimize_network,
     rank_routes,
+    score_assignment_candidates,
     solver_version,
 )
 from .travel import HaversineTravelTimeProvider, TravelTimeProvider
@@ -78,6 +79,7 @@ __all__ = [
     "optimize_assignment_candidates",
     "optimize_network",
     "rank_routes",
+    "score_assignment_candidates",
     "solver_version",
     "run_policy",
     "simulate_snapshot",

@@ -45,7 +45,7 @@ _WLS_ENVIRONMENT_SIGNATURE: tuple[str, str, str] | None = None
 
 @dataclass(frozen=True)
 class OptimizationWeights:
-    """Weights for the normalized 100-point second-stage objective."""
+    """Weights for the normalized 100-point expected-impact objective."""
 
     pantry_coverage_reward: float = 10.0
     raw_food_volume_reward: float = 10.0
@@ -149,6 +149,18 @@ def rank_routes(
     feasible_candidates = _normalize_spatial_deviation(
         feasible_candidates, request, weights
     )
+    scored_candidates = score_assignment_candidates(
+        [
+            AssignmentCandidate(
+                request_id=request.id or "single-driver-request",
+                driver_id=request.driver_id or request.id or "single-driver",
+                route=route,
+            )
+            for route in feasible_candidates
+        ],
+        weights,
+    )
+    feasible_candidates = [item.route for item in scored_candidates]
 
     if gp is None:
         if _development_fallback_enabled():
@@ -173,11 +185,12 @@ def optimize_network(
 ) -> NetworkOptimizationResult:
     """Select a globally consistent set of driver-pickup-pantry assignments.
 
-    Stage one maximizes expected completed pickups. Within one percent of that
-    optimum, stage two balances eight normalized terms: pantry coverage, raw
-    food volume and evenness, ultimately saved food volume and evenness,
-    historical pantry opportunity priority, direct net CO2e benefit, and driver
-    fit. Pantries may receive multiple deliveries during an open window.
+    One normalized expected-impact objective balances pantry coverage, raw food
+    volume and evenness, ultimately saved food volume and evenness, historical
+    pantry opportunity priority, direct net CO2e benefit, and driver fit.
+    Route contributions are weighted by their transparent modeled acceptance
+    probabilities rather than imposing a participation-first cutoff. Pantries
+    may receive multiple deliveries during an open window.
     """
 
     candidates = list(enumerate_assignment_candidates(
@@ -217,7 +230,7 @@ def optimize_assignment_candidates(
             raise GurobiUnavailableError(
                 "Gurobi is required, but gurobipy is not installed in the optimizer runtime."
             )
-        assignments = _greedy_assignment(candidate_list)
+        assignments = _greedy_assignment(candidate_list, weights)
         return NetworkOptimizationResult(
             assignments=tuple(assignments),
             diagnostics=SolverDiagnostics(
@@ -225,7 +238,7 @@ def optimize_assignment_candidates(
                 status="fallback",
                 candidate_count=len(candidate_list),
                 matched_count=len(assignments),
-                route_quality=balanced_objective_value(
+                route_quality=expected_impact_objective_value(
                     candidate_list, assignments, weights
                 ),
                 runtime_seconds=0.0,
@@ -1196,7 +1209,7 @@ def enumerate_assignment_candidates(
     select assignments, not in which routes they are allowed to see.
     """
 
-    return tuple(_assignment_candidates(
+    candidates = _assignment_candidates(
         pickups,
         pantries,
         requests,
@@ -1205,7 +1218,8 @@ def enumerate_assignment_candidates(
         pickup_service_minutes,
         dropoff_service_minutes,
         environmental_assumptions,
-    ))
+    )
+    return tuple(score_assignment_candidates(candidates, weights))
 
 
 def _optimize_network_with_gurobi(
@@ -1265,22 +1279,23 @@ def _solve_network_model(
         ]
         for pantry_key in pantry_keys
     }
-    visit_vars = {
+    expected_coverage_vars = {
         pantry_key: model.addVar(
-            vtype=GRB.BINARY,
-            name=f"pantry_served_{_safe_name(pantry_key)}",
+            lb=0.0,
+            ub=1.0,
+            name=f"expected_pantry_coverage_{_safe_name(pantry_key)}",
         )
         for pantry_key in pantry_keys
     }
     for pantry_key, indices in pantry_indices.items():
-        assignments_to_pantry = gp.quicksum(route_vars[index] for index in indices)
-        model.addConstr(
-            visit_vars[pantry_key] <= assignments_to_pantry,
-            name=f"pantry_visit_lower_{_safe_name(pantry_key)}",
+        expected_assignments_to_pantry = gp.quicksum(
+            candidates[index].route.acceptance_probability * route_vars[index]
+            for index in indices
         )
         model.addConstr(
-            assignments_to_pantry <= len(indices) * visit_vars[pantry_key],
-            name=f"pantry_visit_upper_{_safe_name(pantry_key)}",
+            expected_coverage_vars[pantry_key]
+            <= expected_assignments_to_pantry,
+            name=f"expected_pantry_coverage_{_safe_name(pantry_key)}",
         )
 
     unique_pickups = sorted({item.route.bakery_id for item in candidates})
@@ -1319,11 +1334,15 @@ def _solve_network_model(
     for pantry_key, indices in pantry_indices.items():
         representative = candidates[indices[0]].route
         raw_totals[pantry_key] = representative.pantry_historical_raw_food_kg + gp.quicksum(
-            candidates[index].route.estimated_food_kg * route_vars[index]
+            candidates[index].route.acceptance_probability
+            * candidates[index].route.estimated_food_kg
+            * route_vars[index]
             for index in indices
         )
         saved_totals[pantry_key] = representative.pantry_historical_saved_food_kg + gp.quicksum(
-            candidates[index].route.food_saved_kg * route_vars[index]
+            candidates[index].route.acceptance_probability
+            * candidates[index].route.food_saved_kg
+            * route_vars[index]
             for index in indices
         )
 
@@ -1384,28 +1403,40 @@ def _solve_network_model(
         )
         for item in candidates
     ]
-    coverage_component = gp.quicksum(visit_vars.values()) / max(1, len(pantry_keys))
+    coverage_component = (
+        gp.quicksum(expected_coverage_vars.values()) / max(1, len(pantry_keys))
+    )
     raw_volume_component = gp.quicksum(
-        item.route.estimated_food_kg * route_vars[index]
+        item.route.acceptance_probability
+        * item.route.estimated_food_kg
+        * route_vars[index]
         for index, item in enumerate(candidates)
     ) / raw_capacity
     saved_volume_component = gp.quicksum(
-        item.route.food_saved_kg * route_vars[index]
+        item.route.acceptance_probability
+        * item.route.food_saved_kg
+        * route_vars[index]
         for index, item in enumerate(candidates)
     ) / saved_capacity
     priority_component = gp.quicksum(
-        item.route.pantry_priority * route_vars[index]
+        item.route.acceptance_probability
+        * item.route.pantry_priority
+        * route_vars[index]
         for index, item in enumerate(candidates)
     ) / max_assignments
     environment_component = gp.quicksum(
-        environment_scores[index] * route_vars[index]
+        candidates[index].route.acceptance_probability
+        * environment_scores[index]
+        * route_vars[index]
         for index in range(len(candidates))
     ) / max_assignments
     driver_fit_component = gp.quicksum(
-        driver_fit_scores[index] * route_vars[index]
+        candidates[index].route.acceptance_probability
+        * driver_fit_scores[index]
+        * route_vars[index]
         for index in range(len(candidates))
     ) / max_assignments
-    balanced_objective = (
+    expected_impact_objective = (
         weights.pantry_coverage_reward * coverage_component
         + weights.raw_food_volume_reward * raw_volume_component
         + weights.raw_food_evenness_reward * raw_evenness
@@ -1415,25 +1446,19 @@ def _solve_network_model(
         + weights.environmental_benefit_reward * environment_component
         + weights.driver_fit_reward * driver_fit_component
     )
+    if max_assignments == 1:
+        single_route_scores = _single_route_expected_impact_scores(
+            candidates,
+            weights,
+        )
+        expected_impact_objective = gp.quicksum(
+            single_route_scores[index] * route_vars[index]
+            for index in range(len(candidates))
+        )
 
-    model.ModelSense = GRB.MAXIMIZE
-    model.setObjectiveN(
-        gp.quicksum(
-            candidate.route.acceptance_probability * route_vars[index]
-            for index, candidate in enumerate(candidates)
-        ),
-        index=0,
-        priority=2,
-        weight=1.0,
-        reltol=0.01,
-        name="maximize_expected_completed_deliveries",
-    )
-    model.setObjectiveN(
-        balanced_objective,
-        index=1,
-        priority=1,
-        weight=1.0,
-        name="maximize_normalized_food_fairness_environment_and_driver_fit",
+    model.setObjective(
+        expected_impact_objective,
+        GRB.MAXIMIZE,
     )
     model.optimize()
     if model.Status not in {GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.TIME_LIMIT} or model.SolCount < 1:
@@ -1455,7 +1480,11 @@ def _solve_network_model(
             status=_status_name(model.Status),
             candidate_count=len(candidates),
             matched_count=len(assignments),
-            route_quality=balanced_objective_value(candidates, assignments, weights),
+            route_quality=expected_impact_objective_value(
+                candidates,
+                assignments,
+                weights,
+            ),
             runtime_seconds=float(model.Runtime),
             # Gurobi does not expose MIPGap for every multi-objective solve,
             # including small models solved entirely during presolve.
@@ -1579,27 +1608,39 @@ def _assignment_candidates(
     return result
 
 
-def _greedy_assignment(candidates: list[AssignmentCandidate]) -> list[AssignmentCandidate]:
-    """Explicit development-only fallback; never used silently in production."""
+def _greedy_assignment(
+    candidates: list[AssignmentCandidate],
+    weights: OptimizationWeights,
+) -> list[AssignmentCandidate]:
+    """Explicit development-only expected-impact fallback."""
 
     chosen: list[AssignmentCandidate] = []
     used_requests: set[str] = set()
     used_drivers: set[str] = set()
     used_pickups: set[str] = set()
-    for candidate in sorted(
-        candidates,
-        key=lambda item: (
-            -item.route.acceptance_probability,
-            -item.route.score,
-            item.route.finish_at,
-        ),
-    ):
-        if (
-            candidate.request_id in used_requests
-            or candidate.driver_id in used_drivers
-            or candidate.route.bakery_id in used_pickups
-        ):
-            continue
+    while True:
+        feasible = [
+            candidate
+            for candidate in candidates
+            if candidate not in chosen
+            and candidate.request_id not in used_requests
+            and candidate.driver_id not in used_drivers
+            and candidate.route.bakery_id not in used_pickups
+        ]
+        if not feasible:
+            break
+        candidate = max(
+            feasible,
+            key=lambda item: (
+                expected_impact_objective_value(
+                    candidates,
+                    [*chosen, item],
+                    weights,
+                ),
+                item.route.score,
+                -item.route.finish_at.timestamp(),
+            ),
+        )
         chosen.append(candidate)
         used_requests.add(candidate.request_id)
         used_drivers.add(candidate.driver_id)
@@ -1790,7 +1831,7 @@ def balanced_objective_value(
     assignments: Sequence[AssignmentCandidate],
     weights: OptimizationWeights = OptimizationWeights(),
 ) -> float:
-    """Evaluate the normalized second-stage objective for an auditable result."""
+    """Evaluate the normalized acceptance-adjusted objective."""
 
     if not candidates:
         return 0.0
@@ -1820,11 +1861,13 @@ def balanced_objective_value(
             if _pantry_identity(item.route.pantry_id) == pantry_key
         )
         raw_totals[pantry_key] = representative.pantry_historical_raw_food_kg + sum(
-            item.route.estimated_food_kg for item in assignments
+            item.route.acceptance_probability * item.route.estimated_food_kg
+            for item in assignments
             if _pantry_identity(item.route.pantry_id) == pantry_key
         )
         saved_totals[pantry_key] = representative.pantry_historical_saved_food_kg + sum(
-            item.route.food_saved_kg for item in assignments
+            item.route.acceptance_probability * item.route.food_saved_kg
+            for item in assignments
             if _pantry_identity(item.route.pantry_id) == pantry_key
         )
     raw_gaps = sum(
@@ -1852,22 +1895,47 @@ def balanced_objective_value(
     net_min = min(net_values)
     net_span = max(net_values) - net_min
     environment_component = sum(
-        ((item.route.net_environmental_benefit_kg_co2e - net_min) / net_span if net_span > 1e-9 else 0.5)
+        item.route.acceptance_probability
+        * (
+            (item.route.net_environmental_benefit_kg_co2e - net_min) / net_span
+            if net_span > 1e-9
+            else 0.5
+        )
         for item in assignments
     ) / max_assignments
     max_drive = max(1.0, max(item.route.drive_minutes for item in candidates))
     driver_fit_component = sum(
-        max(0.0, min(1.0, 1.0 - (
+        item.route.acceptance_probability
+        * max(0.0, min(1.0, 1.0 - (
             min(1.0, item.route.drive_minutes / max_drive)
             + min(1.0, item.route.requested_time_deviation_ratio)
             + min(1.0, item.route.normalized_spatial_deviation)
         ) / 3.0))
         for item in assignments
     ) / max_assignments
-    coverage = len({_pantry_identity(item.route.pantry_id) for item in assignments}) / max(1, len(pantry_keys))
-    raw_volume = sum(item.route.estimated_food_kg for item in assignments) / raw_capacity
-    saved_volume = sum(item.route.food_saved_kg for item in assignments) / saved_capacity
-    priority = sum(item.route.pantry_priority for item in assignments) / max_assignments
+    coverage = sum(
+        min(
+            1.0,
+            sum(
+                item.route.acceptance_probability
+                for item in assignments
+                if _pantry_identity(item.route.pantry_id) == pantry_key
+            ),
+        )
+        for pantry_key in pantry_keys
+    ) / max(1, len(pantry_keys))
+    raw_volume = sum(
+        item.route.acceptance_probability * item.route.estimated_food_kg
+        for item in assignments
+    ) / raw_capacity
+    saved_volume = sum(
+        item.route.acceptance_probability * item.route.food_saved_kg
+        for item in assignments
+    ) / saved_capacity
+    priority = sum(
+        item.route.acceptance_probability * item.route.pantry_priority
+        for item in assignments
+    ) / max_assignments
     return (
         weights.pantry_coverage_reward * coverage
         + weights.raw_food_volume_reward * raw_volume
@@ -1878,6 +1946,88 @@ def balanced_objective_value(
         + weights.environmental_benefit_reward * environment_component
         + weights.driver_fit_reward * driver_fit_component
     )
+
+
+def score_assignment_candidates(
+    candidates: Sequence[AssignmentCandidate],
+    weights: OptimizationWeights,
+) -> list[AssignmentCandidate]:
+    """Put each route's one-selection expected-impact value in ``route.score``."""
+
+    candidate_list = list(candidates)
+    expected_scores = _single_route_expected_impact_scores(
+        candidate_list,
+        weights,
+    )
+    return [
+        replace(
+            candidate,
+            route=replace(
+                candidate.route,
+                score=expected_scores[index],
+            ),
+        )
+        for index, candidate in enumerate(candidate_list)
+    ]
+
+
+def _single_route_expected_impact_scores(
+    candidates: Sequence[AssignmentCandidate],
+    weights: OptimizationWeights,
+) -> list[float]:
+    """Return ``acceptance × completed impact`` for each route in isolation."""
+
+    candidate_list = list(candidates)
+    completed_candidates = [
+        replace(
+            candidate,
+            route=replace(candidate.route, acceptance_probability=1.0),
+        )
+        for candidate in candidate_list
+    ]
+    return [
+        candidate.route.acceptance_probability
+        * balanced_objective_value(
+            completed_candidates,
+            [completed_candidates[index]],
+            weights,
+        )
+        for index, candidate in enumerate(candidate_list)
+    ]
+
+
+def expected_impact_objective_value(
+    candidates: Sequence[AssignmentCandidate],
+    assignments: Sequence[AssignmentCandidate],
+    weights: OptimizationWeights = OptimizationWeights(),
+) -> float:
+    """Evaluate the exact one-route score or generalized network objective."""
+
+    candidate_list = list(candidates)
+    assignment_list = list(assignments)
+    max_assignments = max(
+        1,
+        min(
+            len({item.request_id for item in candidate_list}),
+            len({item.driver_id for item in candidate_list}),
+            len({item.route.bakery_id for item in candidate_list}),
+        ),
+    )
+    if max_assignments != 1 or not assignment_list:
+        return balanced_objective_value(
+            candidate_list,
+            assignment_list,
+            weights,
+        )
+    score_by_key = {
+        _assignment_key(candidate): score
+        for candidate, score in zip(
+            candidate_list,
+            _single_route_expected_impact_scores(candidate_list, weights),
+            strict=True,
+        )
+    }
+    return sum(score_by_key[_assignment_key(item)] for item in assignment_list)
 
 
 def _status_name(status: int) -> str:

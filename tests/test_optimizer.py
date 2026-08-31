@@ -221,7 +221,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(result.diagnostics.matched_count, 1)
         self.assertEqual(len({item.driver_id for item in result.assignments}), 1)
 
-    def test_expected_completions_are_optimized_before_route_quality(self) -> None:
+    def test_expected_impact_can_select_multiple_useful_routes(self) -> None:
         second_pickup = BakeryPickup(
             id="b2",
             bakery_name="Second Bakery",
@@ -267,25 +267,35 @@ class OptimizerTests(unittest.TestCase):
         self.assertGreaterEqual(result.diagnostics.route_quality, 0)
         self.assertLessEqual(result.diagnostics.route_quality, 100)
 
-    def test_participation_estimate_can_outweigh_route_quality(self) -> None:
-        candidates = [
-            self.assignment(
-                "r1", "d1", "b1", "p1", 5,
-                acceptance_probability=0.90,
+    def test_expected_impact_can_choose_route_outside_old_99_percent_floor(self) -> None:
+        lower_impact = self.assignment(
+            "r1", "d1", "b1", "p1", 5,
+            acceptance_probability=0.80,
+        )
+        higher_impact = self.assignment(
+            "r1", "d1", "b2", "p2", 100,
+            acceptance_probability=0.78,
+        )
+        higher_impact = replace(
+            higher_impact,
+            route=replace(
+                higher_impact.route,
+                estimated_food_kg=100,
+                usable_food_kg=100,
+                food_saved_kg=100,
+                net_environmental_benefit_kg_co2e=100,
             ),
-            self.assignment(
-                "r1", "d1", "b2", "p2", 100,
-                acceptance_probability=0.40,
-            ),
-        ]
+        )
+        candidates = [lower_impact, higher_impact]
 
         result = optimize_assignment_candidates(candidates)
 
+        self.assertLess(0.78, 0.99 * 0.80)
         self.assertEqual(result.diagnostics.matched_count, 1)
-        self.assertEqual(result.assignments[0].route.bakery_id, "b1")
+        self.assertEqual(result.assignments[0].route.bakery_id, "b2")
         self.assertAlmostEqual(
             result.diagnostics.expected_completed_deliveries,
-            0.90,
+            0.78,
         )
 
     def test_nair_adaptation_minimizes_distance_after_service_count(self) -> None:
@@ -529,7 +539,7 @@ class OptimizerTests(unittest.TestCase):
 
         self.assertEqual(result.assignments[0].route.pantry_id, "p1")
 
-    def test_normalized_stage_two_expands_pantry_coverage(self) -> None:
+    def test_normalized_expected_impact_expands_pantry_coverage(self) -> None:
         candidates = [
             self.assignment("r1", "d1", "b1", "p1", 10),
             self.assignment("r1", "d1", "b1", "p2", 10),

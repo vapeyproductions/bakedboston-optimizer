@@ -25,8 +25,8 @@ POLICY_METADATA = {
     "bakedboston_mip": {
         "label": "BakedBoston Gurobi MIP",
         "description": (
-            "Maximizes expected completed assignments first, then the normalized food, fairness, "
-            "environmental, and driver-fit objective across simultaneous drivers."
+            "Maximizes one acceptance-adjusted expected-impact objective across simultaneous "
+            "drivers, balancing food, fairness, environment, pantry priority, and driver fit."
         ),
         "selectionMode": "rank_one_choice",
         "selectionDescription": (
@@ -34,8 +34,8 @@ POLICY_METADATA = {
             "in the conflict-free menu produced after the joint assignment."
         ),
         "objective": (
-            "Maximize expected completed pickups, then the normalized food, fairness, "
-            "environmental, and driver-fit score within 1% of that optimum."
+            "Maximize the normalized food, fairness, environmental, pantry-priority, and "
+            "driver-fit score after weighting route contributions by modeled acceptance."
         ),
         "inputsUsed": [
             "current driver location",
@@ -424,7 +424,7 @@ def build_web_payload(
     })
     _add_total_impact_scores(payload)
     payload.update({
-        "schemaVersion": 3,
+        "schemaVersion": 4,
         "displayMode": "interactive_replay_of_precomputed_gurobi_experiment",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "sourceSnapshotGeneratedAt": snapshot.generated_at.isoformat(),
@@ -460,11 +460,12 @@ def build_web_payload(
         },
         "network": _network_payload(snapshot),
         "selectionRule": (
-            "The joint Gurobi solve first maximizes expected completed distinct bakery pickups. "
-            "Within one percent of that optimum it maximizes a normalized 100-point score: pantry "
-            "coverage (10), raw donation volume (10), raw donation evenness (10), ultimately saved "
-            "food volume (10), saved-food evenness (10), historical pantry opportunity priority "
-            "(10), net direct CO2 benefit (20), and driver fit (20)."
+            "The joint Gurobi solve maximizes one normalized acceptance-adjusted expected-impact "
+            "score: expected pantry coverage (10), raw donation volume (10), raw donation "
+            "evenness (10), ultimately saved food volume (10), saved-food evenness (10), "
+            "historical pantry opportunity priority (10), net direct CO2 benefit (20), and "
+            "driver fit (20). Route contributions and pantry food totals are weighted by the "
+            "transparent modeled acceptance probability; there is no 99%-of-best filter."
         ),
         "recommendationAllocation": {
             "bakeryPickupExclusiveAcrossMenus": True,
