@@ -1,5 +1,7 @@
 # BakedBoston Schedule Simulation & Optimizer
 
+Demo video: https://studio.youtube.com/video/j_5ge1McwV4/edit
+
 BakedBoston is an academic operations-research demonstration of how volunteer
 drivers could move hypothetical bakery surplus to food pantries under real-world
 time-window constraints. The project is a **simulation, not an operating
