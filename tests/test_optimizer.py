@@ -20,7 +20,8 @@ from bakedboston_optimizer.optimizer import (
     allocate_recommendation_layer,
     optimize_assignment_candidates,
     optimize_horner_slsf_noz_candidates,
-    optimize_nair_distance_first_candidates,
+    optimize_nair_coverage_first_candidates,
+    optimize_rey_equitable_allocation_candidates,
     optimize_network,
     optimize_xue_zou_total_curb_candidates,
     rank_routes,
@@ -298,7 +299,7 @@ class OptimizerTests(unittest.TestCase):
             0.78,
         )
 
-    def test_nair_adaptation_minimizes_distance_after_service_count(self) -> None:
+    def test_nair_adaptation_minimizes_distance_after_coverage_and_service(self) -> None:
         long_high_score = replace(
             self.assignment(
                 "r1", "d1", "b1", "p1", 100,
@@ -324,7 +325,7 @@ class OptimizerTests(unittest.TestCase):
             ),
         )
 
-        result = optimize_nair_distance_first_candidates(
+        result = optimize_nair_coverage_first_candidates(
             [long_high_score, short_low_score]
         )
 
@@ -408,7 +409,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(len(result.recommendations), 1)
         self.assertEqual(result.diagnostics.menu_driver_count, 1)
 
-    def test_nair_adaptation_protects_cardinality_before_distance(self) -> None:
+    def test_nair_adaptation_protects_service_before_distance(self) -> None:
         candidates = [
             replace(
                 self.assignment("r1", "d1", "b1", "p1", 1),
@@ -433,13 +434,74 @@ class OptimizerTests(unittest.TestCase):
             ),
         ]
 
-        result = optimize_nair_distance_first_candidates(candidates)
+        result = optimize_nair_coverage_first_candidates(candidates)
 
         self.assertEqual(result.diagnostics.matched_count, 2)
         self.assertEqual(
             {(item.request_id, item.route.bakery_id) for item in result.assignments},
             {("r1", "b2"), ("r2", "b1")},
         )
+
+    def test_nair_adaptation_protects_distinct_pantry_coverage_before_miles(self) -> None:
+        candidates = [
+            replace(
+                self.assignment("r1", "d1", "b1", "p1", 1),
+                route=replace(
+                    self.assignment("r1", "d1", "b1", "p1", 1).route,
+                    route_distance_miles=1,
+                ),
+            ),
+            replace(
+                self.assignment("r1", "d1", "b2", "p2", 1),
+                route=replace(
+                    self.assignment("r1", "d1", "b2", "p2", 1).route,
+                    route_distance_miles=12,
+                ),
+            ),
+            replace(
+                self.assignment("r2", "d2", "b3", "p1", 1),
+                route=replace(
+                    self.assignment("r2", "d2", "b3", "p1", 1).route,
+                    route_distance_miles=1,
+                ),
+            ),
+        ]
+
+        result = optimize_nair_coverage_first_candidates(candidates)
+
+        self.assertEqual(result.diagnostics.matched_count, 2)
+        self.assertEqual(
+            {item.route.pantry_id for item in result.assignments},
+            {"p1", "p2"},
+        )
+
+    def test_rey_adaptation_minimizes_saved_food_disparity_after_service(self) -> None:
+        candidates = [
+            replace(
+                self.assignment("r1", "d1", "b1", "p1", 1),
+                route=replace(
+                    self.assignment("r1", "d1", "b1", "p1", 1).route,
+                    pantry_historical_saved_food_kg=100,
+                    food_saved_kg=10,
+                    route_distance_miles=1,
+                ),
+            ),
+            replace(
+                self.assignment("r1", "d1", "b1", "p2", 1),
+                route=replace(
+                    self.assignment("r1", "d1", "b1", "p2", 1).route,
+                    pantry_historical_saved_food_kg=0,
+                    food_saved_kg=10,
+                    route_distance_miles=8,
+                ),
+            ),
+        ]
+
+        result = optimize_rey_equitable_allocation_candidates(candidates)
+
+        self.assertEqual(result.diagnostics.matched_count, 1)
+        self.assertEqual(result.assignments[0].route.pantry_id, "p2")
+        self.assertAlmostEqual(result.diagnostics.route_quality, -90)
 
     def test_xue_zou_total_curb_minimizes_direct_system_emissions(self) -> None:
         lower_direct_emissions = replace(

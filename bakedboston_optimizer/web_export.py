@@ -48,11 +48,12 @@ POLICY_METADATA = {
         ],
         "inputsExcluded": [],
     },
-    "nair_2018_distance_first": {
-        "label": "Nair et al. distance-first adaptation",
+    "nair_2018_coverage_first": {
+        "label": "Nair et al. coverage-first adaptation",
         "description": (
             "A minimal volunteer-route adaptation of the 2018 periodic unpaired "
-            "pickup-and-delivery model: protect service first, then minimize miles."
+            "pickup-and-delivery model: protect distinct pantry service first, "
+            "then completed pickups and miles."
         ),
         "selectionMode": "direct_assignment",
         "selectionDescription": (
@@ -60,7 +61,8 @@ POLICY_METADATA = {
             "as the driver's selection."
         ),
         "objective": (
-            "Maximize assigned food-ready pickups, then minimize total route distance."
+            "Maximize distinct pantries served, then assigned food-ready pickups, "
+            "then minimize total route distance."
         ),
         "inputsUsed": [
             "current driver location as route origin",
@@ -71,7 +73,7 @@ POLICY_METADATA = {
         "inputsExcluded": [
             "soft requested-time and ZIP preferences",
             "acceptance probability",
-            "pantry fairness and priority",
+            "pantry priority and historical fairness",
             "food-distribution fraction",
             "CO2e",
         ],
@@ -142,6 +144,44 @@ POLICY_METADATA = {
             "unobserved unhappy-driver penalty history",
         ],
     },
+    "rey_2018_equitable_allocation": {
+        "label": "Rey et al. equitable-allocation adaptation",
+        "description": (
+            "A deliberately limited adaptation of the 2018 food-rescue allocation "
+            "work: protect completed pickup service, then minimize the maximum gap "
+            "in cumulative ultimately distributed food across pantries."
+        ),
+        "selectionMode": "direct_assignment",
+        "selectionDescription": (
+            "The model assigns one route to a driver; that assigned route is recorded "
+            "as the driver's selection."
+        ),
+        "objective": (
+            "Maximize assigned food-ready pickups, then minimize the maximum pairwise "
+            "disparity in cumulative ultimately distributed food, then distance."
+        ),
+        "inputsUsed": [
+            "current driver location as route origin",
+            "hard search horizon",
+            "bakery and pantry availability windows",
+            "daily bakery food and usability",
+            "pantry distribution fraction",
+            "cumulative ultimately distributed-food totals",
+            "route distance as a final tie-break",
+        ],
+        "inputsExcluded": [
+            "soft requested-time and ZIP preferences",
+            "acceptance probability",
+            "pantry priority and coverage",
+            "CO2e",
+            "unobserved pantry requests, vehicle capacity, and multi-stop routes",
+        ],
+        "adaptationBoundary": (
+            "This is not a claim to reproduce Rey et al.'s envy-free allocation model. "
+            "BakedBoston does not observe pantry requests or vehicle capacity and uses "
+            "one-bakery/one-pantry volunteer routes."
+        ),
+    },
     "random_feasible": {
         "label": "Random feasible",
         "description": "Chooses randomly from routes that satisfy the same timing constraints.",
@@ -167,9 +207,10 @@ POLICY_METADATA = {
 
 PUBLIC_COMPARISON_POLICIES: tuple[RoutingPolicy, ...] = (
     RoutingPolicy.BAKEDBOSTON_MIP,
-    RoutingPolicy.NAIR_2018_DISTANCE_FIRST,
+    RoutingPolicy.NAIR_2018_COVERAGE_FIRST,
     RoutingPolicy.XUE_ZOU_2025_TOTAL_CURB,
     RoutingPolicy.HORNER_2021_SLSF_NOZ,
+    RoutingPolicy.REY_2018_EQUITABLE_ALLOCATION,
 )
 
 
@@ -427,7 +468,7 @@ def build_web_payload(
     })
     _add_total_impact_scores(payload)
     payload.update({
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "displayMode": "interactive_replay_of_precomputed_gurobi_experiment",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "sourceSnapshotGeneratedAt": snapshot.generated_at.isoformat(),

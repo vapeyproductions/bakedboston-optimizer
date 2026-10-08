@@ -17,9 +17,10 @@ results.
 | Research stream | Contribution | BakedBoston implementation | Status |
 | --- | --- | --- | --- |
 | Food-rescue scheduling and routing | Joint scheduling, assignment, pickup-and-delivery routing, cost, and service levels | Timed driver–bakery–pantry route columns, hard pickup/receiving windows, one-use bakery occurrences | Adapted and implemented |
-| Nair et al. (2018) comparison model | Mandatory food-rescue service followed by transportation-cost minimization | Public comparator maximizes assigned food-ready pickups, then minimizes miles using current volunteer origins and hard timing feasibility | Distance-first adaptation implemented; not a full PU-PDVRP/Tabu Search replication |
+| Nair et al. (2018) comparison model | Mandatory food-rescue service followed by transportation-cost minimization | Public comparator maximizes distinct pantries served, then assigned food-ready pickups, then minimizes miles using current volunteer origins and hard timing feasibility | Coverage-first adaptation implemented; not a full PU-PDVRP/Tabu Search replication |
 | Xue and Zou (2025) comparison model | Total-Curb open pickup-and-delivery routing minimizes order, waste, and vehicle emissions | Public comparator maximizes assigned food-ready pickups, then minimizes the existing direct system CO₂e ledger | Total-Curb objective adapted and implemented; not a multi-order AINS or driver-familiarity replication |
 | Horner, Pazour, and Mitchell (2021) comparison model | Personalized driver menus optimized under stochastic willingness with final recourse assignment | Public comparator uses 100 seeded willingness scenarios, menus of at most five routes, and SLSF-noZ expected-service optimization | Stochastic-menu strategy adapted and implemented; no unsupported compensation or unhappy-driver penalty |
+| Rey, Almi'ani, and Nair (2018) comparison model | Envy-free food-rescue allocation | Public comparator maximizes assigned pickups, then minimizes the maximum gap in cumulative ultimately distributed food across candidate pantries, then miles | Equitable-allocation adaptation implemented; not a full envy-free, capacitated, multi-stop replication |
 | Pickup-and-delivery routing | Exact network formulations for compatible pickup and delivery movements | Binary route-column variables with driver and bakery exclusivity | Adapted and implemented |
 | Equitable charitable distribution | Equity and service continuity alongside travel efficiency | Opportunity-based pantry priority, coverage, never-served share, Gini coefficient, and service gap | Adapted and implemented |
 | Online routing with occasional drivers | Rolling decisions instead of one static fleet plan | Seeded driver-arrival epochs and re-optimization over pickups still available | Adapted and implemented |
@@ -41,9 +42,10 @@ results.
   This is the closest direct precedent for combining food-rescue scheduling,
   assignment, routing, service levels, and cost. BakedBoston also implements a
   deliberately narrow comparison model derived from this paper: it maximizes
-  feasible pickup assignments under volunteer scarcity and then minimizes
-  distance. The comparator does not receive preference, sigmoid, fairness,
-  food-distribution, or CO₂e inputs. See
+  distinct pantry service under volunteer scarcity, then feasible pickup
+  assignments, and then minimizes distance. The comparator does not receive
+  preference, sigmoid, food-distribution, priority, historical fairness, or
+  CO₂e inputs. See
   [comparison-models.md](comparison-models.md) for its equations and the exact
   boundary between the paper and the platform adaptation.
 - Hernández-Pérez and Salazar-González (2007), “The one-commodity
@@ -85,8 +87,12 @@ results.
   envy-free allocations in food rescue pickup and delivery logistics,”
   *Transportation Research Part E*, 112, 19–46.
   [doi:10.1016/j.tre.2018.02.001](https://doi.org/10.1016/j.tre.2018.02.001).
-  This motivates explicit fairness. BakedBoston does not claim envy-free
-  allocation; it uses opportunity-based priority and distributional metrics.
+  This motivates explicit fairness. The public simulator includes a clearly
+  bounded equitable-allocation adaptation: it preserves pickup service first,
+  then minimizes the largest cumulative ultimately distributed-food gap among
+  candidate pantries. It does not claim the paper's envy-free allocation,
+  which would require observed pantry requests, vehicle capacity, and multi-stop
+  route data that BakedBoston does not have.
 - Orgut et al. (2018), “Robust optimization approaches for the equitable and
   effective distribution of donated food,” *European Journal of Operational
   Research*, 269(2), 516–531.

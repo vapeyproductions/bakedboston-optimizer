@@ -188,7 +188,7 @@ class ExperimentTests(unittest.TestCase):
                 self.assertEqual(len(pickup_ids), len(set(pickup_ids)))
                 self.assertEqual(len(driver_ids), len(set(driver_ids)))
 
-    def test_public_payload_compares_four_declared_academic_models(self) -> None:
+    def test_public_payload_compares_five_declared_academic_models(self) -> None:
         payload = build_web_payload(
             self.snapshot,
             start_date=date(2026, 8, 24),
@@ -203,9 +203,10 @@ class ExperimentTests(unittest.TestCase):
             [item["policy"] for item in payload["results"]],
             [
                 "bakedboston_mip",
-                "nair_2018_distance_first",
+                "nair_2018_coverage_first",
                 "xue_zou_2025_total_curb",
                 "horner_2021_slsf_noz",
+                "rey_2018_equitable_allocation",
             ],
         )
         self.assertEqual(
@@ -213,7 +214,7 @@ class ExperimentTests(unittest.TestCase):
             "rank_one_choice",
         )
         self.assertEqual(
-            payload["policyMetadata"]["nair_2018_distance_first"]["selectionMode"],
+            payload["policyMetadata"]["nair_2018_coverage_first"]["selectionMode"],
             "direct_assignment",
         )
         self.assertEqual(
@@ -224,7 +225,11 @@ class ExperimentTests(unittest.TestCase):
             payload["policyMetadata"]["horner_2021_slsf_noz"]["selectionMode"],
             "direct_assignment",
         )
-        self.assertEqual(payload["schemaVersion"], 4)
+        self.assertEqual(
+            payload["policyMetadata"]["rey_2018_equitable_allocation"]["selectionMode"],
+            "direct_assignment",
+        )
+        self.assertEqual(payload["schemaVersion"], 5)
         self.assertEqual(
             set(payload["totalImpactMethodology"]["pillars"]),
             {"service", "food", "environment", "equity", "volunteer", "efficiency"},

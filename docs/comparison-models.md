@@ -42,7 +42,7 @@ BakedBoston is treated as a route-choice policy in the public replay. After the
 joint assignment resolves conflicts, each driver receives a conflict-free menu
 and selects recommendation rank 1, the highest-scoring route.
 
-## Nair et al. (2018) distance-first adaptation
+## Nair et al. (2018) coverage-first adaptation
 
 ### Source formulation
 
@@ -64,26 +64,35 @@ BakedBoston currently has volunteer requests for one origin–bakery–pantry tr
 not dedicated depot-based multi-stop trucks. It also has no observed vehicle
 capacity or pantry-demand quantity. Inventing those inputs would change the
 simulation beyond the available evidence. The comparison therefore preserves
-the paper's service-first, distance-minimizing logic within BakedBoston's actual
-route contract.
+the paper's service-first logic within BakedBoston's actual route contract,
+but makes the first scarce-volunteer relaxation community-facing: serve as many
+distinct pantries as possible before considering pickup count and distance.
 
-For candidate route $r$, let $x_r$ be 1 when it is assigned. The adapted
-model solves the following lexicographic objectives:
+For candidate route $r$, let $x_r$ be 1 when it is assigned, and let $y_p$ be
+1 when pantry $p$ receives at least one selected route. The adapted model
+solves these lexicographic objectives:
 
 ```math
-\max \sum_{r \in R} x_r
+\max \sum_{p\in P}y_p,
 ```
 
 followed by
 
 ```math
-\min \sum_{r \in R} m_r x_r,
+\max \sum_{r\in R}x_r,
 ```
 
-where $m_r$ is route distance from the driver's current position to the
-bakery and then the pantry. Maximizing assignment count is the minimum required
-relaxation of the paper's mandatory-node service when the realized volunteer
-fleet cannot serve every food-ready bakery.
+then
+
+```math
+\min \sum_{r\in R}m_rx_r.
+```
+
+Here $m_r$ is the distance from the driver's current position to the bakery
+and then the pantry. The first objective protects distinct pantry reach; the
+second is the smallest necessary relaxation of the source paper's mandatory
+service when the realized volunteer fleet cannot serve every food-ready bakery.
+The linking constraints ensure $y_p=1$ exactly when a route to $p$ is assigned.
 
 The model enforces:
 
@@ -111,11 +120,11 @@ The comparator does **not** use the following to select routes:
 
 - soft requested-start or destination-ZIP fit;
 - sigmoid acceptance probability;
-- pantry distribution fraction, priority, coverage, or fairness history;
+- pantry distribution fraction, priority, or historical fairness;
 - bakery quantity/usability as an objective weight; or
 - waste-pathway or transportation CO₂e.
 
-This is explicitly a distance-first adaptation, not a reproduction of the
+This is explicitly a coverage-first adaptation, not a reproduction of the
 paper's depot-based, capacitated, multi-stop weekly Tabu Search implementation.
 The assigned route is recorded as the driver's selection; the model does not
 construct a driver-choice menu.
@@ -280,6 +289,60 @@ the shared evaluator after assignment. Production solves the formulation with
 Gurobi. A clearly labeled development heuristic is used only when a local
 size-limited Gurobi license cannot hold the 100-scenario model.
 
+## Rey, Almi'ani, and Nair (2018) equitable-allocation adaptation
+
+### Source formulation
+
+Rey, Almi'ani, and Nair study food-rescue pickup and delivery allocation with
+the explicit goal of envy-freeness among agencies. Their setting includes
+agency requests, vehicle capacities, and multi-stop pickup-and-delivery routes;
+they develop exact and heuristic approaches for their allocation problem.
+
+Reference: Rey, D., Almi'ani, M., and Nair, D. J. (2018), “Exact and heuristic
+algorithms for finding envy-free allocations in food rescue pickup and delivery
+logistics,” *Transportation Research Part E*, 112, 19–46.
+[doi:10.1016/j.tre.2018.02.001](https://doi.org/10.1016/j.tre.2018.02.001).
+
+### Necessary platform adaptation
+
+BakedBoston does not observe pantry request quantities, vehicle capacity, or
+multi-stop route sequences. It therefore does **not** claim to reproduce the
+paper's envy-free allocation formulation. The limited comparator retains the
+most compatible idea: after preserving as much completed pickup service as
+possible, avoid concentrating ultimately distributed food at one pantry.
+
+Let $H_p^0$ be pantry $p$'s cumulative ultimately distributed food before the
+decision epoch, and let $h_r=Q_rU_rD_{p(r)}$ be the ultimately distributed food
+from candidate route $r$. The final total is
+
+```math
+H_p=H_p^0+\sum_{r\in R(p)}h_rx_r.
+```
+
+The adapted model first maximizes assigned food-ready pickups, then minimizes
+the largest pairwise final-food gap, and finally minimizes route distance:
+
+```math
+\max \sum_{r\in R}x_r,
+```
+
+```math
+\min g\quad\text{where}\quad g\ge H_p-H_{p'}\ \text{and}\ g\ge H_{p'}-H_p
+\quad\forall p,p',
+```
+
+```math
+\min \sum_{r\in R}m_rx_r.
+```
+
+It uses the same one-request, one-driver, and one-food-ready-bakery-occurrence
+constraints as the other direct-assignment comparators. It uses daily bakery
+food/usability, pantry distribution fractions, and prior delivered-food totals
+only to calculate this allocation gap. It does **not** use soft preferences,
+sigmoid acceptance, pantry priority, coverage, CO₂e, inferred pantry demand,
+vehicle capacity, or multi-stop routing. The shared evaluator reports those
+outcomes after selection.
+
 ## Shared evaluation
 
 For every completed route from bakery $b$ to pantry $p$ on day $d$, food
@@ -294,7 +357,7 @@ $Q_{bd}-H_{bpd}$. The latter is split into bakery-unusable food
 $Q_{bd}(1-U_{bd})$, valued with the bakery's landfill/pig-farm/compost mix, and
 pantry-undistributed food $Q_{bd}U_{bd}(1-D_p)$, valued with the pantry's unique
 landfill/pig-farm mix. Environmental reporting applies the same pathway and
-tonne-kilometre coefficients to all four models and reports transportation
+tonne-kilometre coefficients to all five policies and reports transportation
 CO₂e, net waste-pathway CO₂e, total direct CO₂e, and net environmental benefit.
 
 The same transparent sigmoid evaluates every selected route after optimization.

@@ -678,31 +678,31 @@ def _horner_assignment_diagnostics(
     )
 
 
-def optimize_nair_distance_first_candidates(
+def optimize_nair_coverage_first_candidates(
     candidates: list[AssignmentCandidate] | tuple[AssignmentCandidate, ...],
 ) -> NetworkOptimizationResult:
-    """Solve the minimal volunteer-route adaptation of Nair et al. (2018).
+    """Solve the coverage-first volunteer-route adaptation of Nair et al. (2018).
 
-    The original PU-PDVRP minimizes transportation cost while requiring its
-    scheduled pickup and delivery nodes to be served. BakedBoston has a scarce,
-    request-driven volunteer fleet, so mandatory service is relaxed only as far
-    as necessary: first maximize the number of assigned food-ready pickups,
-    then minimize total route distance. Current driver location, facility
-    windows, and the driver's hard search horizon are already embedded in the
-    shared feasible candidate set. Soft driver preferences, acceptance,
-    fairness, food-distribution, and environmental terms do not enter this
-    comparator's objective.
+    Nair et al.'s PU-PDVRP requires scheduled pickup and delivery nodes to be
+    served, then minimizes transportation cost. BakedBoston has a scarce,
+    request-driven volunteer fleet rather than mandatory depot vehicles. This
+    limited adaptation protects distinct pantry service first, then completed
+    food-ready pickups, and finally distance. Current driver location, facility
+    windows, and the hard search horizon are already embedded in the shared
+    feasible candidate set. Soft driver preferences, acceptance, food quantity,
+    pantry distribution, priority, and environmental terms do not select routes.
     """
 
     candidate_list = list(candidates)
+    backend_suffix = "nair_2018_coverage_first_adaptation"
     if not candidate_list:
         return NetworkOptimizationResult(
             assignments=(),
             diagnostics=SolverDiagnostics(
                 backend=(
-                    "gurobi:nair_2018_distance_first_adaptation"
+                    f"gurobi:{backend_suffix}"
                     if gp is not None
-                    else "unavailable:nair_2018_distance_first_adaptation"
+                    else f"unavailable:{backend_suffix}"
                 ),
                 status="no_feasible_assignments",
                 candidate_count=0,
@@ -717,32 +717,23 @@ def optimize_nair_distance_first_candidates(
             raise GurobiUnavailableError(
                 "Gurobi is required, but gurobipy is not installed in the optimizer runtime."
             )
-        utilities = {
-            _assignment_key(item): -item.route.route_distance_miles
-            for item in candidate_list
-        }
-        assignments = _exact_recommendation_layer(candidate_list, utilities)
-        assignments = tuple(sorted(
-            assignments,
-            key=lambda item: (
-                item.route.depart_at,
-                item.route.route_distance_miles,
-                item.request_id,
-            ),
-        ))
+        assignments = _exact_lexicographic_assignment(
+            candidate_list,
+            _nair_coverage_objective,
+        )
         return NetworkOptimizationResult(
-            assignments=assignments,
-            diagnostics=_nair_assignment_diagnostics(
+            assignments=_sorted_assignments(assignments),
+            diagnostics=_nair_coverage_assignment_diagnostics(
                 candidate_list,
                 assignments,
-                backend="development_exact:nair_2018_distance_first_adaptation",
+                backend=f"development_exact:{backend_suffix}",
                 status="fallback",
                 runtime_seconds=0.0,
             ),
         )
 
     with _SOLVER_LOCK:
-        model = _model("nair_2018_distance_first_adaptation")
+        model = _model(backend_suffix)
         try:
             route_vars = {
                 index: model.addVar(vtype=GRB.BINARY, name=f"assign_{index}")
@@ -776,10 +767,44 @@ def optimize_nair_distance_first_candidates(
                     name=f"pickup_{_safe_name(pickup_id)}_at_most_once",
                 )
 
+            pantry_keys = sorted({
+                _pantry_identity(item.route.pantry_id)
+                for item in candidate_list
+            })
+            pantry_coverage_vars = {
+                pantry_key: model.addVar(
+                    vtype=GRB.BINARY,
+                    name=f"covered_pantry_{_safe_name(pantry_key)}",
+                )
+                for pantry_key in pantry_keys
+            }
+            for pantry_key, coverage_var in pantry_coverage_vars.items():
+                pantry_route_vars = [
+                    route_vars[index]
+                    for index, item in enumerate(candidate_list)
+                    if _pantry_identity(item.route.pantry_id) == pantry_key
+                ]
+                model.addConstr(
+                    coverage_var <= gp.quicksum(pantry_route_vars),
+                    name=f"covered_pantry_{_safe_name(pantry_key)}_only_if_served",
+                )
+                model.addConstr(
+                    gp.quicksum(pantry_route_vars)
+                    <= len(pantry_route_vars) * coverage_var,
+                    name=f"covered_pantry_{_safe_name(pantry_key)}_if_served",
+                )
+
             model.ModelSense = GRB.MAXIMIZE
             model.setObjectiveN(
-                gp.quicksum(route_vars.values()),
+                gp.quicksum(pantry_coverage_vars.values()),
                 index=0,
+                priority=3,
+                weight=1.0,
+                name="maximize_distinct_pantries_served",
+            )
+            model.setObjectiveN(
+                gp.quicksum(route_vars.values()),
+                index=1,
                 priority=2,
                 weight=1.0,
                 name="maximize_served_food_ready_pickups",
@@ -789,7 +814,7 @@ def optimize_nair_distance_first_candidates(
                     item.route.route_distance_miles * route_vars[index]
                     for index, item in enumerate(candidate_list)
                 ),
-                index=1,
+                index=2,
                 priority=1,
                 weight=1.0,
                 name="minimize_total_route_distance",
@@ -800,28 +825,20 @@ def optimize_nair_distance_first_candidates(
                 or model.SolCount < 1
             ):
                 raise RuntimeError(
-                    "Gurobi could not solve the Nair et al. distance-first "
+                    "Gurobi could not solve the Nair et al. coverage-first "
                     f"adaptation (status {model.Status})."
                 )
-            assignments = tuple(
+            assignments = _sorted_assignments(tuple(
                 item
                 for index, item in enumerate(candidate_list)
                 if route_vars[index].X > 0.5
-            )
-            assignments = tuple(sorted(
-                assignments,
-                key=lambda item: (
-                    item.route.depart_at,
-                    item.route.route_distance_miles,
-                    item.request_id,
-                ),
             ))
             return NetworkOptimizationResult(
                 assignments=assignments,
-                diagnostics=_nair_assignment_diagnostics(
+                diagnostics=_nair_coverage_assignment_diagnostics(
                     candidate_list,
                     assignments,
-                    backend="gurobi:nair_2018_distance_first_adaptation",
+                    backend=f"gurobi:{backend_suffix}",
                     status=_status_name(model.Status),
                     runtime_seconds=float(model.Runtime),
                     mip_gap=_optional_float_attribute(model, "MIPGap"),
@@ -831,7 +848,19 @@ def optimize_nair_distance_first_candidates(
             model.dispose()
 
 
-def _nair_assignment_diagnostics(
+def _nair_coverage_objective(
+    assignments: Sequence[AssignmentCandidate],
+) -> tuple[float, float, float]:
+    """Lexicographic score for the Nair coverage-first adaptation."""
+
+    return (
+        float(len({_pantry_identity(item.route.pantry_id) for item in assignments})),
+        float(len(assignments)),
+        -sum(item.route.route_distance_miles for item in assignments),
+    )
+
+
+def _nair_coverage_assignment_diagnostics(
     candidates: Sequence[AssignmentCandidate],
     assignments: Sequence[AssignmentCandidate],
     *,
@@ -848,7 +877,7 @@ def _nair_assignment_diagnostics(
         status=status,
         candidate_count=len(candidates),
         matched_count=len(assignments),
-        route_quality=-total_distance,
+        route_quality=_nair_coverage_objective(assignments)[0],
         runtime_seconds=runtime_seconds,
         mip_gap=mip_gap,
         expected_completed_deliveries=sum(
@@ -874,6 +903,335 @@ def _nair_assignment_diagnostics(
             item.route.net_environmental_benefit_kg_co2e for item in assignments
         ),
     )
+
+
+def optimize_rey_equitable_allocation_candidates(
+    candidates: list[AssignmentCandidate] | tuple[AssignmentCandidate, ...],
+) -> NetworkOptimizationResult:
+    """Solve a limited equitable-allocation adaptation of Rey et al. (2018).
+
+    Rey et al. study envy-free allocation with pantry requests, vehicle capacity,
+    and multi-stop routes. Those inputs are not observed in BakedBoston's
+    one-driver, one-bakery, one-pantry route contract. This comparator therefore
+    does not claim envy-free replication: it maximizes feasible completed
+    pickups, then minimizes the largest disparity in cumulative ultimately
+    distributed food across candidate pantries, and uses distance only to break
+    remaining ties. The shared evaluator measures CO2e and driver acceptance
+    afterwards; neither is an allocation input here.
+    """
+
+    candidate_list = list(candidates)
+    backend_suffix = "rey_2018_equitable_allocation_adaptation"
+    if not candidate_list:
+        return NetworkOptimizationResult(
+            assignments=(),
+            diagnostics=SolverDiagnostics(
+                backend=(
+                    f"gurobi:{backend_suffix}"
+                    if gp is not None
+                    else f"unavailable:{backend_suffix}"
+                ),
+                status="no_feasible_assignments",
+                candidate_count=0,
+                matched_count=0,
+                route_quality=0.0,
+                runtime_seconds=0.0,
+            ),
+        )
+
+    if gp is None:
+        if not _development_fallback_enabled():
+            raise GurobiUnavailableError(
+                "Gurobi is required, but gurobipy is not installed in the optimizer runtime."
+            )
+        assignments = _exact_lexicographic_assignment(
+            candidate_list,
+            lambda selected: _rey_equity_objective(candidate_list, selected),
+        )
+        assignments = _sorted_assignments(assignments)
+        return NetworkOptimizationResult(
+            assignments=assignments,
+            diagnostics=_rey_assignment_diagnostics(
+                candidate_list,
+                assignments,
+                backend=f"development_exact:{backend_suffix}",
+                status="fallback",
+                runtime_seconds=0.0,
+            ),
+        )
+
+    with _SOLVER_LOCK:
+        model = _model(backend_suffix)
+        try:
+            route_vars = {
+                index: model.addVar(vtype=GRB.BINARY, name=f"assign_{index}")
+                for index in range(len(candidate_list))
+            }
+            _add_assignment_exclusivity_constraints(model, candidate_list, route_vars)
+
+            pantry_keys = sorted({
+                _pantry_identity(item.route.pantry_id)
+                for item in candidate_list
+            })
+            pantry_indices = {
+                pantry_key: [
+                    index
+                    for index, item in enumerate(candidate_list)
+                    if _pantry_identity(item.route.pantry_id) == pantry_key
+                ]
+                for pantry_key in pantry_keys
+            }
+            final_saved_food = {
+                pantry_key: (
+                    candidate_list[indices[0]].route.pantry_historical_saved_food_kg
+                    + gp.quicksum(
+                        candidate_list[index].route.food_saved_kg * route_vars[index]
+                        for index in indices
+                    )
+                )
+                for pantry_key, indices in pantry_indices.items()
+            }
+            max_gap = model.addVar(lb=0.0, name="maximum_saved_food_gap")
+            for left_index, left in enumerate(pantry_keys):
+                for right in pantry_keys[left_index + 1:]:
+                    model.addConstr(
+                        max_gap >= final_saved_food[left] - final_saved_food[right],
+                        name=f"saved_food_gap_{_safe_name(left)}_{_safe_name(right)}_positive",
+                    )
+                    model.addConstr(
+                        max_gap >= final_saved_food[right] - final_saved_food[left],
+                        name=f"saved_food_gap_{_safe_name(left)}_{_safe_name(right)}_negative",
+                    )
+
+            model.ModelSense = GRB.MAXIMIZE
+            model.setObjectiveN(
+                gp.quicksum(route_vars.values()),
+                index=0,
+                priority=3,
+                weight=1.0,
+                name="maximize_served_food_ready_pickups",
+            )
+            model.setObjectiveN(
+                -max_gap,
+                index=1,
+                priority=2,
+                weight=1.0,
+                name="minimize_maximum_saved_food_disparity",
+            )
+            model.setObjectiveN(
+                -gp.quicksum(
+                    item.route.route_distance_miles * route_vars[index]
+                    for index, item in enumerate(candidate_list)
+                ),
+                index=2,
+                priority=1,
+                weight=1.0,
+                name="minimize_total_route_distance",
+            )
+            model.optimize()
+            if (
+                model.Status not in {GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.TIME_LIMIT}
+                or model.SolCount < 1
+            ):
+                raise RuntimeError(
+                    "Gurobi could not solve the Rey et al. equitable-allocation "
+                    f"adaptation (status {model.Status})."
+                )
+            assignments = _sorted_assignments(tuple(
+                item
+                for index, item in enumerate(candidate_list)
+                if route_vars[index].X > 0.5
+            ))
+            return NetworkOptimizationResult(
+                assignments=assignments,
+                diagnostics=_rey_assignment_diagnostics(
+                    candidate_list,
+                    assignments,
+                    backend=f"gurobi:{backend_suffix}",
+                    status=_status_name(model.Status),
+                    runtime_seconds=float(model.Runtime),
+                    mip_gap=_optional_float_attribute(model, "MIPGap"),
+                ),
+            )
+        finally:
+            model.dispose()
+
+
+def _add_assignment_exclusivity_constraints(
+    model: "gp_typing.Model",
+    candidates: Sequence[AssignmentCandidate],
+    route_vars: dict[int, object],
+) -> None:
+    """Add the common one-request, one-driver, one-pickup constraints."""
+
+    for request_id in sorted({item.request_id for item in candidates}):
+        model.addConstr(
+            gp.quicksum(
+                route_vars[index]
+                for index, item in enumerate(candidates)
+                if item.request_id == request_id
+            ) <= 1,
+            name=f"request_{_safe_name(request_id)}_at_most_once",
+        )
+    for driver_id in sorted({item.driver_id for item in candidates}):
+        model.addConstr(
+            gp.quicksum(
+                route_vars[index]
+                for index, item in enumerate(candidates)
+                if item.driver_id == driver_id
+            ) <= 1,
+            name=f"driver_{_safe_name(driver_id)}_at_most_once",
+        )
+    for pickup_id in sorted({item.route.bakery_id for item in candidates}):
+        model.addConstr(
+            gp.quicksum(
+                route_vars[index]
+                for index, item in enumerate(candidates)
+                if item.route.bakery_id == pickup_id
+            ) <= 1,
+            name=f"pickup_{_safe_name(pickup_id)}_at_most_once",
+        )
+
+
+def _rey_equity_objective(
+    candidates: Sequence[AssignmentCandidate],
+    assignments: Sequence[AssignmentCandidate],
+) -> tuple[float, float, float]:
+    """Lexicographic score for completed service, food equity, then distance."""
+
+    pantry_keys = sorted({_pantry_identity(item.route.pantry_id) for item in candidates})
+    final_saved_food = {
+        pantry_key: next(
+            item.route.pantry_historical_saved_food_kg
+            for item in candidates
+            if _pantry_identity(item.route.pantry_id) == pantry_key
+        )
+        for pantry_key in pantry_keys
+    }
+    for item in assignments:
+        final_saved_food[_pantry_identity(item.route.pantry_id)] += item.route.food_saved_kg
+    disparity = (
+        max(final_saved_food.values()) - min(final_saved_food.values())
+        if final_saved_food
+        else 0.0
+    )
+    return (
+        float(len(assignments)),
+        -disparity,
+        -sum(item.route.route_distance_miles for item in assignments),
+    )
+
+
+def _rey_assignment_diagnostics(
+    candidates: Sequence[AssignmentCandidate],
+    assignments: Sequence[AssignmentCandidate],
+    *,
+    backend: str,
+    status: str,
+    runtime_seconds: float,
+    mip_gap: float | None = None,
+) -> SolverDiagnostics:
+    """Report Rey's maximum saved-food gap and the common post-hoc ledger."""
+
+    total_distance = sum(item.route.route_distance_miles for item in assignments)
+    return SolverDiagnostics(
+        backend=backend,
+        status=status,
+        candidate_count=len(candidates),
+        matched_count=len(assignments),
+        route_quality=_rey_equity_objective(candidates, assignments)[1],
+        runtime_seconds=runtime_seconds,
+        mip_gap=mip_gap,
+        expected_completed_deliveries=sum(
+            item.route.acceptance_probability for item in assignments
+        ),
+        route_distance_miles=total_distance,
+        estimated_food_kg=sum(item.route.estimated_food_kg for item in assignments),
+        usable_food_kg=sum(item.route.usable_food_kg for item in assignments),
+        food_saved_kg=sum(item.route.food_saved_kg for item in assignments),
+        collected_not_distributed_kg=sum(
+            item.route.collected_not_distributed_kg for item in assignments
+        ),
+        avoided_system_kg_co2e=sum(
+            item.route.avoided_system_kg_co2e for item in assignments
+        ),
+        transport_kg_co2e=sum(
+            item.route.transport_kg_co2e for item in assignments
+        ),
+        residual_waste_kg_co2e=sum(
+            item.route.residual_waste_kg_co2e for item in assignments
+        ),
+        net_environmental_benefit_kg_co2e=sum(
+            item.route.net_environmental_benefit_kg_co2e
+            for item in assignments
+        ),
+    )
+
+
+def _exact_lexicographic_assignment(
+    candidates: Sequence[AssignmentCandidate],
+    objective: object,
+) -> tuple[AssignmentCandidate, ...]:
+    """Solve small specialist comparators exactly when Gurobi is unavailable."""
+
+    options_by_request: dict[str, list[AssignmentCandidate]] = {}
+    for item in candidates:
+        options_by_request.setdefault(item.request_id, []).append(item)
+    for options in options_by_request.values():
+        options.sort(key=lambda item: _assignment_key(item))
+    request_ids = sorted(options_by_request)
+    best_value: tuple[float, ...] | None = None
+    best_keys: tuple[tuple[str, str, str], ...] = ()
+    best_items: tuple[AssignmentCandidate, ...] = ()
+
+    def visit(
+        request_index: int,
+        chosen: tuple[AssignmentCandidate, ...],
+        used_drivers: frozenset[str],
+        used_pickups: frozenset[str],
+    ) -> None:
+        nonlocal best_value, best_keys, best_items
+        if request_index == len(request_ids):
+            value = objective(chosen)  # type: ignore[operator]
+            keys = tuple(sorted(_assignment_key(item) for item in chosen))
+            if (
+                best_value is None
+                or value > best_value
+                or (value == best_value and (not best_keys or keys < best_keys))
+            ):
+                best_value = value
+                best_keys = keys
+                best_items = chosen
+            return
+
+        visit(request_index + 1, chosen, used_drivers, used_pickups)
+        for item in options_by_request[request_ids[request_index]]:
+            if item.driver_id in used_drivers or item.route.bakery_id in used_pickups:
+                continue
+            visit(
+                request_index + 1,
+                (*chosen, item),
+                used_drivers | {item.driver_id},
+                used_pickups | {item.route.bakery_id},
+            )
+
+    visit(0, (), frozenset(), frozenset())
+    return best_items
+
+
+def _sorted_assignments(
+    assignments: Sequence[AssignmentCandidate],
+) -> tuple[AssignmentCandidate, ...]:
+    return tuple(sorted(
+        assignments,
+        key=lambda item: (
+            item.route.depart_at,
+            item.route.route_distance_miles,
+            item.request_id,
+            item.route.bakery_id,
+            item.route.pantry_id,
+        ),
+    ))
 
 
 def optimize_xue_zou_total_curb_candidates(

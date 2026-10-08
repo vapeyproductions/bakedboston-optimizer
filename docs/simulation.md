@@ -75,14 +75,13 @@ models make different earlier selections.
   opportunity priority, net direct CO₂e benefit, and driver fit. A route with
   slightly lower modeled acceptance can therefore be selected when its broader
   impact is materially stronger.
-- **Nair et al. distance-first adaptation:** a minimal volunteer-route
+- **Nair et al. coverage-first adaptation:** a minimal volunteer-route
   adaptation of the periodic unpaired pickup-and-delivery model in Nair,
-  Rashidi, and Dixit (2018). It first maximizes the number of assigned
-  food-ready pickups, which is the smallest necessary relaxation of the
-  paper's mandatory-service requirement under scarce volunteers, and then
-  minimizes total route miles. It uses the driver's current position as route
-  origin plus hard search and facility-window feasibility. It does not use
-  soft time/ZIP preferences, sigmoid acceptance, pantry priority/fairness,
+  Rashidi, and Dixit (2018). It first maximizes distinct pantries served, then
+  maximizes assigned food-ready pickups, and finally minimizes total route
+  miles. It uses the driver's current position as route origin plus hard
+  search and facility-window feasibility. It does not use soft time/ZIP
+  preferences, sigmoid acceptance, pantry priority or historical fairness,
   food-distribution fractions, or CO₂e to choose routes.
 - **Xue-Zou Total-Curb adaptation:** a minimal volunteer-route adaptation of
   Xue and Zou's (2025) open pickup-and-delivery model. It first maximizes the
@@ -100,6 +99,16 @@ models make different earlier selections.
   Drivers signal willingness for menu options and the platform assigns one
   willing route in the recourse stage. The model uses the existing sigmoid but
   does not use food, fairness, priority, or CO₂e in menu construction.
+- **Rey et al. equitable-allocation adaptation:** a deliberately limited
+  adaptation of Rey, Almi'ani, and Nair's (2018) envy-free food-rescue work.
+  It first maximizes assigned food-ready pickups, then minimizes the maximum
+  pairwise disparity in cumulative ultimately distributed food across candidate
+  pantries, and uses distance only as a final tie-break. It uses food,
+  usability, pantry distribution, and prior ultimately distributed-food totals
+  for that allocation calculation, but not soft preferences, sigmoid
+  acceptance, pantry priority/coverage, or CO₂e. It does not claim to
+  reproduce the source paper's pantry requests, capacity constraints, or
+  multi-stop routes.
 - **Random feasible:** selects a seeded random conflict-free assignment.
 - **Shortest route:** greedily minimizes driving time.
 - **Earliest deadline:** greedily serves the bakery pickup with the earliest
@@ -210,9 +219,10 @@ trivial case in which every policy makes the same assignment.
 
 The bundled five-day public replay contains nine fictional bakeries, nine
 fictional pantries, and no more than three drivers entering one decision epoch.
-Its public table compares BakedBoston with the Nair et al. distance-first
-adaptation, the Xue-Zou Total-Curb adaptation, and the Horner et al.
-stochastic-menu adaptation. The older transparent
+Its public table compares BakedBoston with the Nair et al. coverage-first
+adaptation, the Xue-Zou Total-Curb adaptation, the Horner et al.
+stochastic-menu adaptation, and the Rey et al. equitable-allocation
+adaptation. The older transparent
 heuristics remain available to the command-line experiment runner but are
 intentionally excluded from the current public comparison while research
 comparators are being revised.

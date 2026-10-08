@@ -166,13 +166,14 @@ excluded merely for having received food.
 
 ## Reproducible rolling-horizon comparison
 
-The public academic experiment compares BakedBoston with a distance-first
-adaptation of Nair, Rashidi, and Dixit's food-rescue pickup-and-delivery model
-and a Total-Curb adaptation of Xue and Zou's carbon-aware meal-delivery model,
-plus a stochastic-menu adaptation of Horner, Pazour, and Mitchell's SLSF-noZ model
-over identical five-day seeded scenarios. The bundled public replay uses nine
-fictional bakeries, nine fictional pantries, synthetic volunteer requests, and
-at most three drivers entering any one decision epoch:
+The public academic experiment compares BakedBoston with a coverage-first
+adaptation of Nair, Rashidi, and Dixit's food-rescue pickup-and-delivery model,
+a Total-Curb adaptation of Xue and Zou's carbon-aware meal-delivery model, a
+stochastic-menu adaptation of Horner, Pazour, and Mitchell's SLSF-noZ model,
+and an equitable-allocation adaptation of Rey, Almi'ani, and Nair's food-rescue
+allocation work over identical five-day seeded scenarios. The bundled public
+replay uses nine fictional bakeries, nine fictional pantries, synthetic
+volunteer requests, and at most three drivers entering any one decision epoch:
 
 ```bash
 python3 -m bakedboston_optimizer.compare \
@@ -196,8 +197,12 @@ into one network-wide Gurobi solve. The JSON contains the complete auditable
 event trace; the CSV contains one analysis-ready row per horizon and policy.
 
 The public policies are the BakedBoston Gurobi MIP, the Nair et al. (2018)
-distance-first adaptation, the Xue-Zou (2025) Total-Curb adaptation, and the
-Horner et al. (2021) stochastic-menu adaptation. The Horner comparator creates
+coverage-first adaptation, the Xue-Zou (2025) Total-Curb adaptation, the
+Horner et al. (2021) stochastic-menu adaptation, and the Rey et al. (2018)
+equitable-allocation adaptation. Nair protects distinct pantry service before
+pickup count and miles; Rey protects pickup service before minimizing the
+largest cumulative ultimately distributed-food gap among candidate pantries.
+The Horner comparator creates
 menus of at most five routes over 100 seeded willingness scenarios, then makes
 a final recourse assignment among routes drivers signal they would accept. The
 command-line runner also retains the older random, shortest-route,
@@ -231,14 +236,16 @@ rescue routing is a new problem class:
   optimize personalized driver menus under stochastic willingness and make a
   final recourse assignment. The public adaptation uses their SLSF-noZ variant
   so no unsupported compensation or unhappy-driver penalty is introduced.
+- [Rey, Almi'ani, and Nair (2018)](https://doi.org/10.1016/j.tre.2018.02.001)
+  study envy-free food-rescue allocation. The public comparator is a clearly
+  bounded equitable-allocation adaptation, not a reproduction of the source
+  model's pantry requests, capacities, or multi-stop routes.
 - [Hernandez-Perez and Salazar-Gonzalez (2007)](https://doi.org/10.1002/net.20209)
   provide an exact formulation for the one-commodity pickup-and-delivery
   traveling-salesman problem, a useful structural ancestor for unpaired surplus
   pickup and pantry delivery.
-- [Rey, Almi'ani, and Nair (2018)](https://doi.org/10.1016/j.tre.2018.02.001)
-  model envy-free food-rescue allocation, while
-  [Orgut et al. (2018)](https://doi.org/10.1016/j.ejor.2018.02.017) study robust,
-  equitable donated-food distribution. These motivate measuring service gaps
+- [Orgut et al. (2018)](https://doi.org/10.1016/j.ejor.2018.02.017) study robust,
+  equitable donated-food distribution. This motivates measuring service gaps
   and rewarding opportunity-based pantry priority rather than minimizing miles
   alone.
 - [The online VRP with occasional drivers (2021)](https://doi.org/10.1016/j.cor.2020.105144)

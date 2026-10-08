@@ -38,7 +38,8 @@ from .optimizer import (
     estimate_acceptance_probability,
     optimize_assignment_candidates,
     optimize_horner_slsf_noz_candidates,
-    optimize_nair_distance_first_candidates,
+    optimize_nair_coverage_first_candidates,
+    optimize_rey_equitable_allocation_candidates,
     optimize_xue_zou_total_curb_candidates,
     score_assignment_candidates,
     solver_version,
@@ -59,9 +60,10 @@ class RoutingPolicy(StrEnum):
     """Routing strategies evaluated on the same feasible candidate set."""
 
     BAKEDBOSTON_MIP = "bakedboston_mip"
-    NAIR_2018_DISTANCE_FIRST = "nair_2018_distance_first"
+    NAIR_2018_COVERAGE_FIRST = "nair_2018_coverage_first"
     XUE_ZOU_2025_TOTAL_CURB = "xue_zou_2025_total_curb"
     HORNER_2021_SLSF_NOZ = "horner_2021_slsf_noz"
+    REY_2018_EQUITABLE_ALLOCATION = "rey_2018_equitable_allocation"
     RANDOM_FEASIBLE = "random_feasible"
     SHORTEST_ROUTE = "shortest_route"
     EARLIEST_DEADLINE = "earliest_deadline"
@@ -1425,8 +1427,8 @@ def _select_assignments(
 ) -> NetworkOptimizationResult:
     if policy == RoutingPolicy.BAKEDBOSTON_MIP:
         return optimize_assignment_candidates(tuple(candidates), weights=weights)
-    if policy == RoutingPolicy.NAIR_2018_DISTANCE_FIRST:
-        return optimize_nair_distance_first_candidates(tuple(candidates))
+    if policy == RoutingPolicy.NAIR_2018_COVERAGE_FIRST:
+        return optimize_nair_coverage_first_candidates(tuple(candidates))
     if policy == RoutingPolicy.XUE_ZOU_2025_TOTAL_CURB:
         return optimize_xue_zou_total_curb_candidates(tuple(candidates))
     if policy == RoutingPolicy.HORNER_2021_SLSF_NOZ:
@@ -1439,6 +1441,8 @@ def _select_assignments(
             ),
             realized_willingness=realized_willingness,
         )
+    if policy == RoutingPolicy.REY_2018_EQUITABLE_ALLOCATION:
+        return optimize_rey_equitable_allocation_candidates(tuple(candidates))
     started = clock.perf_counter()
     key = _policy_sort_key(policy, pickups, seed, epoch)
     selected = _greedy_select(candidates, key)
@@ -1495,9 +1499,9 @@ def _policy_sort_key(
             item.route.bakery_id,
             item.route.pantry_id,
         )
-    if policy == RoutingPolicy.NAIR_2018_DISTANCE_FIRST:
+    if policy == RoutingPolicy.NAIR_2018_COVERAGE_FIRST:
         return lambda item: (
-            item.route.route_distance_miles,
+            item.route.pantry_historical_saved_food_kg,
             item.route.finish_at,
             item.route.bakery_id,
             item.route.pantry_id,
@@ -1516,6 +1520,14 @@ def _policy_sort_key(
     if policy == RoutingPolicy.HORNER_2021_SLSF_NOZ:
         return lambda item: (
             -item.route.acceptance_probability,
+            item.route.route_distance_miles,
+            item.route.finish_at,
+            item.route.bakery_id,
+            item.route.pantry_id,
+        )
+    if policy == RoutingPolicy.REY_2018_EQUITABLE_ALLOCATION:
+        return lambda item: (
+            item.route.pantry_historical_saved_food_kg + item.route.food_saved_kg,
             item.route.route_distance_miles,
             item.route.finish_at,
             item.route.bakery_id,
