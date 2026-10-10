@@ -204,9 +204,7 @@ class RouteCandidate:
     pantry_historical_saved_food_kg: float = 0.0
     food_saved_kg: float = 0.0
     collected_not_distributed_kg: float = 0.0
-    bakery_unusable_food_kg: float = 0.0
-    pantry_undistributed_food_kg: float = 0.0
-    bakery_route_waste_kg_co2e: float = 0.0
+    pantry_residual_food_kg: float = 0.0
     pantry_route_waste_kg_co2e: float = 0.0
     pantry_landfill_fraction: float = 0.0
     pantry_pig_farm_fraction: float = 0.0

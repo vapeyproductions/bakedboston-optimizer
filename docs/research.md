@@ -157,9 +157,8 @@ results.
   landfill / 60% pig farm, with 20%–60% landfill tested in sensitivity analysis;
   BakedBoston's pantry values are fixed fictional scenarios within that range.
   The public simulator reports food saved, bakery food not picked up,
-  bakery-unusable food, pantry-undistributed food, and one net direct CO₂e
-  result. These are declared scenario coefficients, not a verified carbon
-  inventory.
+  completed-route pantry residual food, and one net direct CO₂e result. These
+  are declared scenario coefficients, not a verified carbon inventory.
 
 ## Evidence and validation boundary
 

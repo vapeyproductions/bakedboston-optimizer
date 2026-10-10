@@ -172,9 +172,9 @@ The comparison report includes:
 - distribution fairness as a pantry-service Gini coefficient and service gap;
 - mean drive time, distance, preferred-destination deviation, and
   total trip duration;
-- ultimately saved food $Q\times U\times D$, bakery food not picked up,
-  bakery-unusable food $Q(1-U)$, and pantry-undistributed food
-  $QU(1-D)$, plus total food wasted as the aggregate of those sources;
+- ultimately saved food $Q\times U\times D$, bakery food not picked up, and
+  pantry residual food $Q-QUD$ on completed pickups; all completed-route
+  residual is disposed of through the destination pantry;
 - transport kg CO₂e, net waste-pathway kg CO₂e for landfill/pig-farm/compost,
   total direct kg CO₂e, and net direct environmental benefit;
 - offers, accepted routes, simulated rejections, expected acceptance, likely

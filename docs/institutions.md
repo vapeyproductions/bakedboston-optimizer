@@ -75,10 +75,12 @@ For a completed bakery–pantry route, the ultimate saved food is
 H_{bpd}=Q_{bd}U_{bd}D_p,
 ```
 
-bakery-unusable food is $W^B_{bd}=Q_{bd}(1-U_{bd})$, and pantry-undistributed
-food is $W^P_{bpd}=Q_{bd}U_{bd}(1-D_p)$. The primary direct environmental
-benefit is the difference between the bakery no-pickup waste outcome and those
-two completed-route waste outcomes, less transportation emissions. The full
+the completed-route pantry residual is $W^P_{bpd}=Q_{bd}-Q_{bd}U_{bd}D_p$.
+All collected food reaches the pantry, so this residual—including food found
+unusable—is assigned to the pantry's disposal mix. The primary direct
+environmental benefit is the difference between the bakery no-pickup waste
+outcome and the completed-route pantry waste outcome, less transportation
+emissions. The full
 derivation and source interpretation are in
 [`model.md`](model.md) and [`research.md`](research.md).
 

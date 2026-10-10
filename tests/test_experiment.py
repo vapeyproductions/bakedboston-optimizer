@@ -439,9 +439,7 @@ class ExperimentTests(unittest.TestCase):
                     self.assertIn("driverStart", route)
                     self.assertIn("bakeryLocation", route)
                     self.assertIn("pantryLocation", route)
-                    self.assertIn("bakeryUnusableFoodKg", route)
-                    self.assertIn("pantryUndistributedFoodKg", route)
-                    self.assertIn("bakeryRouteWasteKgCO2e", route)
+                    self.assertIn("pantryResidualFoodKg", route)
                     self.assertIn("pantryRouteWasteKgCO2e", route)
                     self.assertAlmostEqual(
                         route["pantryLandfillFraction"]

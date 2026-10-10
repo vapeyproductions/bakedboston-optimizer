@@ -497,10 +497,10 @@ def build_web_payload(
             "productionSubstitutionFraction": DEFAULT_ENVIRONMENTAL_ASSUMPTIONS.production_substitution_fraction,
             "interpretation": (
                 "Declared academic scenario coefficients. The primary objective credits the "
-                "difference between the bakery's no-pickup waste outcome and two route-waste "
-                "streams: bakery-unusable food under the bakery mix and pantry-undistributed "
-                "food under that pantry's landfill/pig-farm mix. It then subtracts usable-cargo "
-                "tonne-kilometre transport emissions. Avoided production is held at zero in the "
+                "difference between the bakery's no-pickup waste outcome and the completed-route "
+                "pantry residual under that pantry's landfill/pig-farm mix. A completed pickup "
+                "transfers all food to the pantry; only an uncollected pickup uses the bakery mix. "
+                "It then subtracts full-cargo tonne-kilometre transport emissions. Avoided production is held at zero in the "
                 "primary score."
             ),
         },

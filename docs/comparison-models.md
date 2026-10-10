@@ -353,12 +353,13 @@ H_{bpd}=Q_{bd}U_{bd}D_p.
 ```
 
 Food wasted is the sum of all uncollected bakery food and the route remainder
-$Q_{bd}-H_{bpd}$. The latter is split into bakery-unusable food
-$Q_{bd}(1-U_{bd})$, valued with the bakery's landfill/pig-farm/compost mix, and
-pantry-undistributed food $Q_{bd}U_{bd}(1-D_p)$, valued with the pantry's unique
-landfill/pig-farm mix. Environmental reporting applies the same pathway and
-tonne-kilometre coefficients to all five policies and reports transportation
-CO₂e, net waste-pathway CO₂e, total direct CO₂e, and net environmental benefit.
+$Q_{bd}-H_{bpd}$. Because a completed pickup transfers all food to its pantry,
+that full remainder—including food found unusable—is valued with the destination
+pantry's unique landfill/pig-farm mix. Only food never picked up uses the
+bakery's landfill/pig-farm/compost mix. Environmental reporting applies the
+same pathway and tonne-kilometre coefficients to all five policies and reports
+transportation CO₂e, net waste-pathway CO₂e, total direct CO₂e, and net
+environmental benefit.
 
 The same transparent sigmoid evaluates every selected route after optimization.
 The public deterministic replay reports mean expected acceptance and the shares

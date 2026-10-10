@@ -2571,12 +2571,8 @@ def _candidate(
         collected_not_distributed_kg=(
             environmental_impact.collected_not_distributed_kg
         ),
-        bakery_unusable_food_kg=environmental_impact.bakery_unusable_food_kg,
-        pantry_undistributed_food_kg=(
-            environmental_impact.pantry_undistributed_food_kg
-        ),
-        bakery_route_waste_kg_co2e=(
-            environmental_impact.bakery_route_waste_kg_co2e
+        pantry_residual_food_kg=(
+            environmental_impact.pantry_residual_food_kg
         ),
         pantry_route_waste_kg_co2e=(
             environmental_impact.pantry_route_waste_kg_co2e

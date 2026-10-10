@@ -209,9 +209,7 @@ class ExperimentAssignment:
     pantry_distribution_fraction: float
     food_saved_kg: float
     collected_not_distributed_kg: float
-    bakery_unusable_food_kg: float
-    pantry_undistributed_food_kg: float
-    bakery_route_waste_kg_co2e: float
+    pantry_residual_food_kg: float
     pantry_route_waste_kg_co2e: float
     pantry_landfill_fraction: float
     pantry_pig_farm_fraction: float
@@ -274,13 +272,7 @@ class ExperimentAssignment:
             "pantryDistributionFraction": round(self.pantry_distribution_fraction, 4),
             "foodSavedKg": round(self.food_saved_kg, 3),
             "collectedNotDistributedKg": round(self.collected_not_distributed_kg, 3),
-            "bakeryUnusableFoodKg": round(self.bakery_unusable_food_kg, 3),
-            "pantryUndistributedFoodKg": round(
-                self.pantry_undistributed_food_kg, 3
-            ),
-            "bakeryRouteWasteKgCO2e": round(
-                self.bakery_route_waste_kg_co2e, 4
-            ),
+            "pantryResidualFoodKg": round(self.pantry_residual_food_kg, 3),
             "pantryRouteWasteKgCO2e": round(
                 self.pantry_route_waste_kg_co2e, 4
             ),
@@ -331,9 +323,7 @@ class ExperimentCandidate:
     pantry_distribution_fraction: float
     food_saved_kg: float
     collected_not_distributed_kg: float
-    bakery_unusable_food_kg: float
-    pantry_undistributed_food_kg: float
-    bakery_route_waste_kg_co2e: float
+    pantry_residual_food_kg: float
     pantry_route_waste_kg_co2e: float
     pantry_landfill_fraction: float
     pantry_pig_farm_fraction: float
@@ -401,13 +391,7 @@ class ExperimentCandidate:
             "pantryDistributionFraction": round(self.pantry_distribution_fraction, 4),
             "foodSavedKg": round(self.food_saved_kg, 3),
             "collectedNotDistributedKg": round(self.collected_not_distributed_kg, 3),
-            "bakeryUnusableFoodKg": round(self.bakery_unusable_food_kg, 3),
-            "pantryUndistributedFoodKg": round(
-                self.pantry_undistributed_food_kg, 3
-            ),
-            "bakeryRouteWasteKgCO2e": round(
-                self.bakery_route_waste_kg_co2e, 4
-            ),
+            "pantryResidualFoodKg": round(self.pantry_residual_food_kg, 3),
             "pantryRouteWasteKgCO2e": round(
                 self.pantry_route_waste_kg_co2e, 4
             ),
@@ -1644,9 +1628,7 @@ def _experiment_assignment(
         pantry_distribution_fraction=route.pantry_distribution_fraction,
         food_saved_kg=route.food_saved_kg,
         collected_not_distributed_kg=route.collected_not_distributed_kg,
-        bakery_unusable_food_kg=route.bakery_unusable_food_kg,
-        pantry_undistributed_food_kg=route.pantry_undistributed_food_kg,
-        bakery_route_waste_kg_co2e=route.bakery_route_waste_kg_co2e,
+        pantry_residual_food_kg=route.pantry_residual_food_kg,
         pantry_route_waste_kg_co2e=route.pantry_route_waste_kg_co2e,
         pantry_landfill_fraction=route.pantry_landfill_fraction,
         pantry_pig_farm_fraction=route.pantry_pig_farm_fraction,
@@ -1719,9 +1701,7 @@ def _experiment_candidate(
         pantry_distribution_fraction=route.pantry_distribution_fraction,
         food_saved_kg=route.food_saved_kg,
         collected_not_distributed_kg=route.collected_not_distributed_kg,
-        bakery_unusable_food_kg=route.bakery_unusable_food_kg,
-        pantry_undistributed_food_kg=route.pantry_undistributed_food_kg,
-        bakery_route_waste_kg_co2e=route.bakery_route_waste_kg_co2e,
+        pantry_residual_food_kg=route.pantry_residual_food_kg,
         pantry_route_waste_kg_co2e=route.pantry_route_waste_kg_co2e,
         pantry_landfill_fraction=route.pantry_landfill_fraction,
         pantry_pig_farm_fraction=route.pantry_pig_farm_fraction,

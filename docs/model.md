@@ -97,19 +97,19 @@ H_{bpd}=Q_{bd}U_{bd}D_p.
 
 If a food-available bakery occurrence is not picked up, all $Q_{bd}$ is
 recorded as uncollected bakery food and follows bakery $b$'s waste mix. If it
-is picked up, the aggregate food not ultimately distributed remains
+is picked up, the full donation is delivered to the pantry, and the food not
+ultimately distributed is
 
 ```math
 W_{bpd}=Q_{bd}-H_{bpd}
 ```
 
-but its disposal is evaluated at the institution where each portion occurs.
-Bakery-unusable food and pantry-undistributed food are
+and is disposed of by that destination pantry. This residual includes food
+found unusable during pantry handling and usable food that the pantry cannot
+distribute; it is not left at the bakery:
 
 ```math
-W^B_{bd}=Q_{bd}(1-U_{bd}),
-\qquad
-W^P_{bpd}=Q_{bd}U_{bd}(1-D_p).
+W^P_{bpd}=Q_{bd}-Q_{bd}U_{bd}D_p.
 ```
 
 Each bakery has fixed landfill, pig-farm, and compost shares
@@ -127,19 +127,19 @@ e_p=L_pe_L+P_pe_P.
 The no-pickup result is $Q_{bd}e_b$. The completed-route waste result is
 
 ```math
-C_r^W=W^B_{bd}e_b+W^P_{bpd}e_p.
+C_r^W=W^P_{bpd}e_p.
 ```
 
 Transportation uses 0.41947 kg CO₂e/tonne-km:
 
 ```math
-T_r=0.41947\left(\frac{Q_{bd}U_{bd}}{1000}\right)\left(1.60934\,\mathrm{miles}_r\right).
+T_r=0.41947\left(\frac{Q_{bd}}{1000}\right)\left(1.60934\,\mathrm{miles}_r\right).
 ```
 
 The primary direct environmental coefficient is
 
 ```math
-E_r=Q_{bd}e_b-\left(W^B_{bd}e_b+W^P_{bpd}e_p\right)-T_r.
+E_r=Q_{bd}e_b-W^P_{bpd}e_p-T_r.
 ```
 
 The primary score conservatively sets avoided-production substitution to zero;

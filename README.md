@@ -7,6 +7,13 @@ drivers could move hypothetical bakery surplus to food pantries under real-world
 time-window constraints. The project is a **simulation, not an operating
 delivery service**.
 
+## Start here
+
+For installation, a quick two-replication check, the full 500-replication
+benchmark command, and a command that validates the committed evidence package,
+read [REPRODUCIBILITY.md](REPRODUCIBILITY.md). The published benchmark outputs
+are in [results/benchmark_2026_10_10](results/benchmark_2026_10_10).
+
 Real institution names, locations, and publicly listed schedules can be used as
 read-only templates. Inclusion does not imply participation, affiliation,
 available food, or consent to receive a delivery. Bakery surplus, pantry staff
@@ -73,11 +80,12 @@ H_{bpd}=Q_{bd}U_{bd}D_p.
 
 Food-available bakery occurrences with no completed pickup are recorded as
 uncollected bakery food and follow the bakery's landfill/pig-farm/compost mix.
-For a completed route, bakery-unusable food $Q(1-U)$ follows that same bakery
-mix, while pantry-undistributed food $QU(1-D)$ follows the destination pantry's
-unique landfill/pig-farm mix. Every pantry mix sums to 100% and assigns 0% to
-compost. Tonne-kilometre transport emissions for usable cargo are then
-subtracted. Avoided production is held at zero in the primary score.
+For a completed route, the full pickup $Q$ is delivered to the pantry. The
+pantry then distributes $QUD$ and manages the full residual $Q-QUD$—including
+food found unusable—as waste under its unique landfill/pig-farm mix. Every
+pantry mix sums to 100% and assigns 0% to compost. Tonne-kilometre transport
+emissions use the full collected cargo mass. Avoided production is held at zero
+in the primary score.
 
 The normalized expected-impact objective is
 
@@ -212,6 +220,36 @@ routes, while each selector reads only the inputs represented in its
 formulation. The detailed protocol and metric definitions are in
 [docs/simulation.md](docs/simulation.md); the exact paper-adaptation boundary is in
 [docs/comparison-models.md](docs/comparison-models.md).
+
+## 500-replication academic benchmark
+
+The report-ready experiment is separate from the single-seed website
+walkthrough. It runs 500 independent seeded five-day replications in each of
+three fixed conditions—standard operations, scarce drivers, and high
+surplus—while evaluating all five declared policies on the same scenario within
+each replication. That produces 1,500 shared scenarios and 7,500 policy-level
+results.
+
+```bash
+python3 -m bakedboston_optimizer.benchmark \
+  data/academic_comparison_snapshot.json \
+  --start-date 2026-08-24 \
+  --replications 500 \
+  --master-seed 20261010 \
+  --horizon-days 5 \
+  --matching-interval-minutes 60 \
+  --max-simultaneous-drivers 3 \
+  --output-dir results/benchmark_2026_10_10 \
+  --progress-every 10
+```
+
+The output directory contains raw replication metrics, confidence intervals,
+paired BakedBoston-versus-comparator differences, a generated report-results
+section, and a manifest with every derived seed plus input/source hashes. The
+primary run uses the synthetic acceptance replay; use `--disable-acceptance`
+only for a separately labeled routing-capacity sensitivity analysis. The full
+protocol and interpretation limits are in
+[docs/benchmark-protocol.md](docs/benchmark-protocol.md).
 
 The bundled academic comparison fixture is deliberately contention-rich: nine
 fictional bakeries, nine fictional pantries, and fewer drivers than available
@@ -411,7 +449,9 @@ docs/
   model.md
   research.md
   simulation.md
-  simulation.md
+  benchmark-protocol.md
+results/
+  benchmark_2026_10_10/  Published repeated-simulation evidence package
 api/
   recommendations.py
 tests/
@@ -435,4 +475,4 @@ fairness metrics, and five-day reports.
 - test robustness across denser schedules and more random seeds;
 - calibrate the transparent acceptance function with future consented data;
 - add traffic scenarios while retaining deterministic replay; and
-- add confidence intervals and publication-ready plots.
+- add additional scenario conditions and publication-ready plots.
